@@ -1,123 +1,81 @@
-import { 
-  Card, 
-  CardContent, 
-  CardDescription, 
-  CardHeader, 
-  CardTitle 
-} from "@/components/ui/card";
-import { 
-  Activity, 
-  CreditCard, 
-  DollarSign, 
-  Users 
-} from "lucide-react";
+import Link from 'next/link';
+import { Button } from '@/components/ui/button';
 
-export default function DashboardPage() {
+export default function HomePage() {
   return (
-    /* Changed flex-1 to w-full and added max-w-screen-2xl for better ultra-wide support */
-    <div className="w-full p-8 pt-6">
-      <div className="flex items-center justify-between mb-8">
-        <h2 className="text-3xl font-bold tracking-tight">Dashboard Overview</h2>
-      </div>
-      
-      {/* Top Stats Row - Spaced evenly across the full width */}
-      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4 mb-8">
-        <Card className="shadow-sm">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Revenue</CardTitle>
-            <DollarSign className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">$45,231.89</div>
-            <p className="text-xs text-muted-foreground">+20.1% from last month</p>
-          </CardContent>
-        </Card>
-        <Card className="shadow-sm">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Active Projects</CardTitle>
-            <Users className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">+12</div>
-            <p className="text-xs text-muted-foreground">+2 since yesterday</p>
-          </CardContent>
-        </Card>
-        <Card className="shadow-sm">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Sales</CardTitle>
-            <CreditCard className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">+12,234</div>
-            <p className="text-xs text-muted-foreground">+19% from last month</p>
-          </CardContent>
-        </Card>
-        <Card className="shadow-sm">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Active Now</CardTitle>
-            <Activity className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">+573</div>
-            <p className="text-xs text-muted-foreground">+201 since last hour</p>
-          </CardContent>
-        </Card>
-      </div>
+    <div className="min-h-screen bg-[#0f172a] text-white">
+      {/* Navigation */}
+      <nav className="bg-[#1e2937] border-b border-slate-700 px-6 py-4 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="text-3xl">🔀</div>
+          <span className="font-bold text-2xl">SplitEasy</span>
+        </div>
+        <div className="flex gap-4">
+          <Link href="/login">
+            <Button variant="ghost" className="text-slate-300 hover:text-white">
+              Sign In
+            </Button>
+          </Link>
+          <Link href="/register">
+            <Button className="bg-emerald-500 hover:bg-emerald-600">
+              Sign Up Free
+            </Button>
+          </Link>
+        </div>
+      </nav>
 
-      {/* Main Content Area - Enlarged to occupy the full width */}
-      <div className="grid gap-6 md:grid-cols-1 lg:grid-cols-12">
-        <Card className="lg:col-span-8 shadow-sm">
-          <CardHeader>
-            <CardTitle>Design Engineering Progress</CardTitle>
-            <CardDescription>
-              Project tracking for your current design sprints.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="h-[400px] w-full rounded-xl border border-dashed flex items-center justify-center bg-muted/20">
-              <span className="text-muted-foreground">Detailed Analytics View</span>
-            </div>
-          </CardContent>
-        </Card>
-        
-        <Card className="lg:col-span-4 shadow-sm">
-          <CardHeader>
-            <CardTitle>Recent Sales & Marketing</CardTitle>
-            <CardDescription>
-              You made 265 sales this month.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-             <div className="space-y-8">
-                <div className="flex items-center">
-                   <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center font-bold text-primary">OM</div>
-                   <div className="ml-4 space-y-1">
-                      <p className="text-sm font-medium leading-none">Olivia Martin</p>
-                      <p className="text-sm text-muted-foreground">olivia.martin@email.com</p>
-                   </div>
-                   <div className="ml-auto font-medium">+$1,999.00</div>
-                </div>
-                <div className="flex items-center">
-                   <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center font-bold text-primary">JL</div>
-                   <div className="ml-4 space-y-1">
-                      <p className="text-sm font-medium leading-none">Jackson Lee</p>
-                      <p className="text-sm text-muted-foreground">jackson.lee@email.com</p>
-                   </div>
-                   <div className="ml-auto font-medium">+$39.00</div>
-                </div>
-                {/* Added an extra entry to fill more space */}
-                <div className="flex items-center">
-                   <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center font-bold text-primary">IN</div>
-                   <div className="ml-4 space-y-1">
-                      <p className="text-sm font-medium leading-none">Isabella Nguyen</p>
-                      <p className="text-sm text-muted-foreground">isabella.nguyen@email.com</p>
-                   </div>
-                   <div className="ml-auto font-medium">+$299.00</div>
-                </div>
-             </div>
-          </CardContent>
-        </Card>
-      </div>
+      {/* Hero Section */}
+      <section className="px-6 py-20 max-w-6xl mx-auto">
+        <div className="space-y-8 text-center mb-16">
+          <h1 className="text-5xl md:text-6xl font-bold tracking-tight">
+            Stop fighting over bills.{' '}
+            <span className="text-emerald-400">Start splitting easier.</span>
+          </h1>
+          <p className="text-xl text-slate-400 max-w-2xl mx-auto">
+            📸 Snap receipt → 🤖 Auto-split → 💸 Get paid instantly.
+            Zero-friction expense splitting for roommates, trips, friends, and families.
+          </p>
+          <div className="flex gap-4 justify-center pt-8">
+            <Link href="/register">
+              <Button className="bg-emerald-500 hover:bg-emerald-600 text-white px-8 py-6 text-lg rounded-3xl">
+                Try Demo Group →
+              </Button>
+            </Link>
+          </div>
+        </div>
+
+        {/* Features Grid */}
+        <div className="grid md:grid-cols-3 gap-8 mt-20">
+          <div className="bg-[#1e2937] rounded-3xl p-8 border border-slate-700">
+            <div className="text-4xl mb-4">📸</div>
+            <h3 className="text-xl font-semibold mb-3">Snap & Share</h3>
+            <p className="text-slate-400">
+              Take a photo of any receipt and instantly share it with your group.
+            </p>
+          </div>
+          <div className="bg-[#1e2937] rounded-3xl p-8 border border-slate-700">
+            <div className="text-4xl mb-4">⚖️</div>
+            <h3 className="text-xl font-semibold mb-3">Smart Splitting</h3>
+            <p className="text-slate-400">
+              Equal splits, custom percentages, or precise amounts. We calculate it all.
+            </p>
+          </div>
+          <div className="bg-[#1e2937] rounded-3xl p-8 border border-slate-700">
+            <div className="text-4xl mb-4">💸</div>
+            <h3 className="text-xl font-semibold mb-3">Instant Settlements</h3>
+            <p className="text-slate-400">
+              See who owes what and settle instantly with a click. Drama-free payments.
+            </p>
+          </div>
+        </div>
+
+        {/* Trust Signals */}
+        <div className="text-center mt-20 pt-12 border-t border-slate-700">
+          <p className="text-slate-400">
+            ✨ Trusted by 10k+ roommates and travelers worldwide
+          </p>
+        </div>
+      </section>
     </div>
   );
 }
