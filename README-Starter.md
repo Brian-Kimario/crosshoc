@@ -80,7 +80,7 @@ SplitEasy fixes this with **instant magic links** + **auto-calculated fair split
    pnpm dlx create-next-app@latest spliteasy --typescript --tailwind --eslint --app --yes
    cd spliteasy
    ```
-````
+
 
 2. Install dependencies **with pnpm**:
    ```bash
@@ -467,3 +467,4 @@ This UI will make recruiters stop scrolling and say “This actually feels like 
 > “Build the complete Next.js 15 app using App Router, TypeScript, Tailwind, shadcn/ui, and the exact UI design system described below. Make it beautiful, mobile-first, and delightful.”
 
 Want me to generate the exact Tailwind component code for the **ExpenseCard** or the **Balance Panel** next? Or a Figma-style text wireframe for any specific screen? Just say which one! 🚀
+````
