@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -11,14 +12,37 @@ export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const router = useRouter();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    // TODO: Later we will call /api/auth/login here
-    console.log('Login attempt:', { email, password });
-    alert('✅ Login API will be connected in the next step!');
-    setLoading(false);
+    setError('');
+
+    try {
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email, password }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setError(data.error || 'Login failed');
+        setLoading(false);
+        return;
+      }
+
+      // Login successful - redirect to dashboard
+      router.push('/dashboard');
+    } catch (err: any) {
+      setError(err.message || 'An error occurred');
+      setLoading(false);
+    }
   };
 
   return (
@@ -35,6 +59,12 @@ export default function LoginPage() {
         </CardHeader>
 
         <CardContent>
+          {error && (
+            <div className="mb-4 p-3 bg-red-900/20 border border-red-700 rounded-lg text-red-400 text-sm">
+              {error}
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-6">
             <div className="space-y-2">
               <Label htmlFor="email" className="text-slate-300">Email</Label>
@@ -45,6 +75,7 @@ export default function LoginPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
+                disabled={loading}
                 className="bg-slate-900 border-slate-600 text-white"
               />
             </div>
@@ -58,6 +89,7 @@ export default function LoginPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
+                disabled={loading}
                 className="bg-slate-900 border-slate-600 text-white"
               />
             </div>

@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -12,14 +13,50 @@ export default function RegisterPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const router = useRouter();
+  const searchParams = useSearchParams();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    // TODO: Later we will call /api/auth/register here
-    console.log('Register attempt:', { name, email, password });
-    alert('✅ Register API will be connected in the next step!');
-    setLoading(false);
+    setError('');
+
+    // Basic validation
+    if (password.length < 6) {
+      setError('Password must be at least 6 characters');
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ name, email, password }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setError(data.error || 'Registration failed');
+        setLoading(false);
+        return;
+      }
+
+      // Registration successful - redirect to dashboard
+      const inviteToken = searchParams.get('inviteToken');
+      if (inviteToken) {
+        router.push(`/join/${inviteToken}`);
+        return;
+      }
+      router.push('/dashboard');
+    } catch (err: any) {
+      setError(err.message || 'An error occurred');
+      setLoading(false);
+    }
   };
 
   return (
@@ -36,6 +73,12 @@ export default function RegisterPage() {
         </CardHeader>
 
         <CardContent>
+          {error && (
+            <div className="mb-4 p-3 bg-red-900/20 border border-red-700 rounded-lg text-red-400 text-sm">
+              {error}
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-6">
             <div className="space-y-2">
               <Label htmlFor="name" className="text-slate-300">Full name</Label>
@@ -46,6 +89,7 @@ export default function RegisterPage() {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 required
+                disabled={loading}
                 className="bg-slate-900 border-slate-600 text-white"
               />
             </div>
@@ -59,6 +103,7 @@ export default function RegisterPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
+                disabled={loading}
                 className="bg-slate-900 border-slate-600 text-white"
               />
             </div>
@@ -72,8 +117,10 @@ export default function RegisterPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
+                disabled={loading}
                 className="bg-slate-900 border-slate-600 text-white"
               />
+              <p className="text-xs text-slate-500">Minimum 6 characters</p>
             </div>
 
             <Button
