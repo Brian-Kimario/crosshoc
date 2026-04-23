@@ -1,4 +1,3 @@
-````markdown
 # SplitEasy – Zero-Friction Group Expense Splitter
 
 **A modern, full-stack Next.js web app that makes splitting expenses in groups (roommates, trips, friends, families) effortless and drama-free.**
