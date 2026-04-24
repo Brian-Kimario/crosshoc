@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo } from "react";
-import { Share2 } from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
+import { Share2, RefreshCw, Clock, Copy, QrCode } from "lucide-react";
 import { toast } from "sonner";
+import { QRCodeSVG } from "qrcode.react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,31 +17,96 @@ import {
 } from "@/components/ui/dialog";
 
 interface ShareGroupDialogProps {
+  groupId: string;
   inviteToken: string;
+  inviteExpiresAt?: string | null;
 }
 
-export function ShareGroupDialog({ inviteToken }: ShareGroupDialogProps) {
-  const magicLink = useMemo(() => {
-    if (typeof window === "undefined") {
-      return "";
-    }
+function getTimeRemaining(expiresAt?: string | null): string | null {
+  if (!expiresAt) return null;
+  const diff = new Date(expiresAt).getTime() - Date.now();
+  if (diff <= 0) return null;
+  const hours = Math.floor(diff / (1000 * 60 * 60));
+  const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+  if (hours > 0) return `${hours}h ${minutes}m remaining`;
+  return `${minutes}m remaining`;
+}
 
-    return `${window.location.origin}/join/${inviteToken}`;
-  }, [inviteToken]);
+function getTimeColor(expiresAt?: string | null): "green" | "amber" | "red" | null {
+  if (!expiresAt) return null;
+  const diff = new Date(expiresAt).getTime() - Date.now();
+  const hours = diff / (1000 * 60 * 60);
+  if (hours > 24) return "green";
+  if (hours > 6) return "amber";
+  return "red";
+}
+
+export function ShareGroupDialog({ groupId, inviteToken, inviteExpiresAt }: ShareGroupDialogProps) {
+  const [currentToken, setCurrentToken] = useState(inviteToken);
+  const [currentExpiry, setCurrentExpiry] = useState(inviteExpiresAt);
+  const [refreshing, setRefreshing] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [showQR, setShowQR] = useState(false);
+
+  const isExpired = useMemo(() => {
+    if (!currentExpiry) return false;
+    return new Date(currentExpiry).getTime() < Date.now();
+  }, [currentExpiry]);
+
+  const timeRemaining = getTimeRemaining(currentExpiry);
+  const timeColor = getTimeColor(currentExpiry);
+
+  const magicLink = useMemo(() => {
+    if (typeof window === "undefined") return "";
+    return `${window.location.origin}/join/${currentToken}`;
+  }, [currentToken]);
 
   const copyLink = async () => {
-    if (!magicLink) return;
-
     try {
+      // Try modern clipboard API first
       await navigator.clipboard.writeText(magicLink);
-      toast.success("Magic link copied");
     } catch {
-      toast.error("Failed to copy magic link");
+      // Fallback: use textarea + execCommand for focus/permission issues
+      const el = document.createElement("textarea");
+      el.value = magicLink;
+      el.style.position = "fixed";
+      el.style.opacity = "0";
+      document.body.appendChild(el);
+      el.focus();
+      el.select();
+      try {
+        document.execCommand("copy");
+      } catch {
+        toast.error("Failed to copy magic link");
+        document.body.removeChild(el);
+        return;
+      }
+      document.body.removeChild(el);
     }
+    toast.success("Magic link copied");
   };
 
+  const refreshLink = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      const res = await fetch(`/api/groups/${groupId}/refresh-invite`, {
+        method: "POST",
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (!res.ok) { toast.error(data.error || "Failed to refresh link"); return; }
+      setCurrentToken(data.data.inviteToken);
+      setCurrentExpiry(data.data.inviteExpiresAt);
+      toast.success("New invite link generated — valid for 72 hours");
+    } catch {
+      toast.error("Failed to refresh link");
+    } finally {
+      setRefreshing(false);
+    }
+  }, [groupId]);
+
   return (
-    <Dialog>
+    <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger
         render={<Button className="rounded-3xl bg-emerald-500 hover:bg-emerald-600 text-white" />}
       >
@@ -54,15 +120,105 @@ export function ShareGroupDialog({ inviteToken }: ShareGroupDialogProps) {
             Send this magic link to invite members.
           </DialogDescription>
         </DialogHeader>
+
         <div className="space-y-3">
+          {/* Expiry status with color coding */}
+          {isExpired ? (
+            <div className="flex items-center gap-2 rounded-2xl bg-amber-500/10 border border-amber-500/30 px-3 py-2">
+              <Clock className="size-4 text-amber-400 shrink-0" />
+              <p className="text-sm text-amber-300">
+                This link has expired. Generate a new one to invite members.
+              </p>
+            </div>
+          ) : timeRemaining ? (
+            <div
+              className={`flex items-center gap-2 rounded-2xl px-3 py-2 ${
+                timeColor === "green"
+                  ? "bg-emerald-500/10 border border-emerald-500/20"
+                  : timeColor === "amber"
+                    ? "bg-amber-500/10 border border-amber-500/30"
+                    : "bg-rose-500/10 border border-rose-500/30"
+              }`}
+            >
+              <Clock
+                className={`size-4 shrink-0 ${
+                  timeColor === "green"
+                    ? "text-emerald-400"
+                    : timeColor === "amber"
+                      ? "text-amber-400"
+                      : "text-rose-400"
+                }`}
+              />
+              <p
+                className={`text-sm ${
+                  timeColor === "green"
+                    ? "text-emerald-300"
+                    : timeColor === "amber"
+                      ? "text-amber-300"
+                      : "text-rose-300"
+                }`}
+              >
+                {timeRemaining}
+              </p>
+            </div>
+          ) : null}
+
+          {/* QR Code Toggle */}
+          {!isExpired && (
+            <Button
+              variant="outline"
+              onClick={() => setShowQR(!showQR)}
+              className="w-full rounded-3xl border-slate-700 bg-transparent hover:bg-slate-800 text-slate-300"
+            >
+              <QrCode className="size-4 mr-2" />
+              {showQR ? "Hide QR Code" : "Show QR Code"}
+            </Button>
+          )}
+
+          {/* QR Code Display */}
+          {showQR && !isExpired && magicLink && (
+            <div className="flex justify-center py-4">
+              <div className="bg-white p-4 rounded-2xl">
+                <QRCodeSVG value={magicLink} size={200} />
+              </div>
+            </div>
+          )}
+
           <Input
             readOnly
-            value={magicLink}
-            className="bg-slate-950 border-slate-700 text-slate-200"
+            value={isExpired ? "Link expired" : magicLink}
+            className={`bg-slate-950 border-slate-700 ${isExpired ? "text-slate-500" : "text-slate-200"}`}
           />
-          <Button onClick={copyLink} className="w-full rounded-3xl bg-emerald-500 hover:bg-emerald-600">
-            Copy Magic Link
-          </Button>
+
+          {isExpired ? (
+            <Button
+              onClick={refreshLink}
+              disabled={refreshing}
+              className="w-full rounded-3xl bg-amber-500 hover:bg-amber-600 text-white"
+            >
+              <RefreshCw className={`size-4 mr-2 ${refreshing ? "animate-spin" : ""}`} />
+              {refreshing ? "Generating..." : "Generate New Link"}
+            </Button>
+          ) : (
+            <div className="flex gap-2">
+              <Button
+                onClick={copyLink}
+                className="flex-1 rounded-3xl bg-emerald-500 hover:bg-emerald-600"
+              >
+                <Copy className="size-4 mr-2" />
+                Copy Link
+              </Button>
+              <Button
+                onClick={refreshLink}
+                disabled={refreshing}
+                variant="outline"
+                className="rounded-3xl border-slate-700 bg-transparent hover:bg-slate-800 text-slate-300"
+                title="Refresh link"
+              >
+                <RefreshCw className={`size-4 ${refreshing ? "animate-spin" : ""}`} />
+              </Button>
+            </div>
+          )}
         </div>
       </DialogContent>
     </Dialog>

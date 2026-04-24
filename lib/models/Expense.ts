@@ -14,6 +14,10 @@ export interface IExpense extends Document {
     amount: number;
   }>;
   receiptUrl?: string;
+  isGuest?: boolean;
+  guestId?: string;
+  guestName?: string;
+  guestShare?: number; // guest's own portion of the split
   createdAt: Date;
   updatedAt?: Date;
 }
@@ -71,6 +75,23 @@ const ExpenseSchema: Schema = new Schema({
   ],
   receiptUrl: {
     type: String,
+    default: null,
+  },
+  isGuest: {
+    type: Boolean,
+    default: false,
+  },
+  guestId: {
+    type: String,
+    default: null,
+    index: true,
+  },
+  guestName: {
+    type: String,
+    default: null,
+  },
+  guestShare: {
+    type: Number,
     default: null,
   },
   createdAt: {

@@ -137,50 +137,8 @@ export default async function DashboardPage() {
           </div>
         </div>
 
-        {/* Groups and Activity Grid */}
-        <div className="grid gap-6 md:grid-cols-2">
-          {/* Groups Card */}
-          <div className="rounded-3xl border border-slate-700 bg-slate-800/50 p-6">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <Users className="size-5 text-emerald-500" />
-                <h2 className="text-xl font-semibold text-white">Your Groups</h2>
-              </div>
-              <span className="text-sm text-slate-400">{groups.length} total</span>
-            </div>
-
-            {groups.length === 0 ? (
-              <div className="text-center py-8">
-                <p className="text-slate-400">No groups yet. Create one to get started!</p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {groups.slice(0, 5).map((group) => (
-                  <Link
-                    key={String(group._id)}
-                    href={`/groups/${group._id}`}
-                    className="flex items-center justify-between rounded-2xl border border-slate-700 bg-slate-900/60 px-4 py-3 hover:border-emerald-500/50 transition-colors"
-                  >
-                    <div>
-                      <p className="font-medium text-white">{group.name}</p>
-                      <p className="text-xs text-slate-400">
-                        {group.members?.length || 0} members
-                      </p>
-                    </div>
-                    <span className="text-emerald-400 text-sm">View →</span>
-                  </Link>
-                ))}
-                {groups.length > 5 && (
-                  <p className="text-center text-sm text-slate-400 pt-2">
-                    +{groups.length - 5} more groups
-                  </p>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Activity Card */}
-          <div className="rounded-3xl border border-slate-700 bg-slate-800/50 p-6">
+        {/* Quick Stats */}
+        <div className="rounded-3xl border border-slate-700 bg-slate-800/50 p-6">
             <div className="flex items-center gap-2 mb-4">
               <Receipt className="size-5 text-emerald-500" />
               <h2 className="text-xl font-semibold text-white">Quick Stats</h2>

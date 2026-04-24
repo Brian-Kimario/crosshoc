@@ -181,7 +181,8 @@ export async function POST(request: NextRequest) {
     const populated = await Expense.findById(expense._id)
       .populate("paidBy", "name email avatar")
       .populate("createdBy", "name email")
-      .populate("splits.user", "name email avatar");
+      .populate("splits.user", "name email avatar")
+      .lean();
 
     return successResponse({ expense: populated }, 201);
   } catch {
@@ -215,9 +216,17 @@ export async function GET(request: NextRequest) {
       .populate("paidBy", "name email avatar")
       .populate("createdBy", "name email")
       .populate("splits.user", "name email avatar")
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .lean();
 
-    return successResponse({ expenses });
+    // Re-attach guest fields that .populate().lean() preserves but we make explicit
+    const shaped = expenses.map((e: any) => ({
+      ...e,
+      isGuest: e.isGuest ?? false,
+      guestName: e.guestName ?? null,
+    }));
+
+    return successResponse({ expenses: shaped });
   } catch {
     return errorResponse("Failed to fetch expenses.", 500);
   }

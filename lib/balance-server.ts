@@ -5,7 +5,12 @@ import dbConnect from "./db";
 import Expense from "./models/Expense";
 import Group from "./models/Group";
 import Settlement from "./models/Settlement";
+import GuestSettlement from "./models/GuestSettlement";
 import type { UserBalanceSummary, GroupMemberBalance, SimplifiedDebt } from "./balance-types";
+
+function roundToCents(value: number) {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
 
 // Note: Types are NOT re-exported from this file to avoid Next.js server action issues
 // Import types directly from @/lib/balance-types instead
@@ -137,12 +142,15 @@ export async function calculateUserBalances(userId: string): Promise<import("./b
 
 /**
  * Calculate balances for all members in a specific group
- * Includes both expenses and settlements
+ * Includes both expenses and settlements.
+ * Guest expenses (isGuest: true) are attributed to a virtual guest entry
+ * identified by guestId+guestName, so registered members' balances are
+ * correctly reduced when a guest pays for something.
  */
 export async function calculateGroupBalances(groupId: string): Promise<import("./balance-types").GroupMemberBalance[]> {
   await dbConnect();
 
-  // Fetch all expenses
+  // Fetch all expenses — include isGuest / guestId / guestName fields
   const expenses = await Expense.find({ group: groupId })
     .populate("paidBy", "name email avatar")
     .populate("splits.user", "name email avatar")
@@ -158,34 +166,85 @@ export async function calculateGroupBalances(groupId: string): Promise<import(".
 
   // Process expenses
   for (const expense of expenses) {
-    const paidByUser = expense.paidBy as any;
-    const paidById = String(paidByUser._id);
+    const expenseAny = expense as any;
     const amount = expense.amount;
 
-    // Ensure payer is in map
-    if (!userMap.has(paidById)) {
-      userMap.set(paidById, {
-        userId: paidById,
-        name: paidByUser.name,
-        email: paidByUser.email,
-        avatar: paidByUser.avatar,
-        paid: 0,
-        owed: 0,
-        balance: 0,
-      });
+    // ── Determine the effective payer ──────────────────────────────────────
+    // For guest expenses the DB paidBy is a placeholder (first group member).
+    // We use a virtual key based on guestId so the real member is not credited.
+    const isGuest: boolean = !!expenseAny.isGuest;
+    const guestId: string | null = expenseAny.guestId || null;
+    const guestName: string = expenseAny.guestName || "Guest";
+
+    let payerId: string;
+    let payerEntry: import("./balance-types").GroupMemberBalance;
+
+    if (isGuest && guestId) {
+      // Virtual guest key — won't collide with any MongoDB ObjectId
+      payerId = `guest::${guestId}`;
+      if (!userMap.has(payerId)) {
+        userMap.set(payerId, {
+          userId: payerId,
+          name: guestName,
+          email: "",
+          avatar: undefined,
+          paid: 0,
+          owed: 0,
+          balance: 0,
+        });
+      }
+      payerEntry = userMap.get(payerId)!;
+    } else {
+      const paidByUser = expense.paidBy as any;
+      payerId = String(paidByUser._id);
+      if (!userMap.has(payerId)) {
+        userMap.set(payerId, {
+          userId: payerId,
+          name: paidByUser.name,
+          email: paidByUser.email,
+          avatar: paidByUser.avatar,
+          paid: 0,
+          owed: 0,
+          balance: 0,
+        });
+      }
+      payerEntry = userMap.get(payerId)!;
     }
 
-    // Add to payer's paid amount
-    const payer = userMap.get(paidById)!;
-    payer.paid += amount;
+    // Credit the payer
+    payerEntry.paid += amount;
 
-    // Process splits
+    // ── Guest's own share ──────────────────────────────────────────────────
+    // The guest paid the full bill but owes their own portion back.
+    // guestShare is stored on new expenses. For legacy expenses (guestShare null),
+    // derive it: total - sum(member splits). This is always correct regardless
+    // of when the expense was created.
+    if (isGuest && guestId) {
+      const storedGuestShare: number | null = expenseAny.guestShare ?? null;
+      let guestShare: number;
+
+      if (storedGuestShare !== null && storedGuestShare > 0) {
+        guestShare = storedGuestShare;
+      } else {
+        // Derive from splits: guest's share = total - what members owe
+        const memberSplitTotal = expense.splits.reduce(
+          (sum: number, s: { amount: number }) => sum + s.amount,
+          0
+        );
+        guestShare = roundToCents(amount - memberSplitTotal);
+      }
+
+      if (guestShare > 0) {
+        payerEntry.owed += guestShare;
+      }
+    }
+
+    // ── Process splits ─────────────────────────────────────────────────────
     for (const split of expense.splits) {
       const splitUser = split.user as any;
       const splitUserId = String(splitUser._id);
       const splitAmount = split.amount;
 
-      // Ensure split user is in map
       if (!userMap.has(splitUserId)) {
         userMap.set(splitUserId, {
           userId: splitUserId,
@@ -198,9 +257,7 @@ export async function calculateGroupBalances(groupId: string): Promise<import(".
         });
       }
 
-      // Add to user's owed amount
-      const user = userMap.get(splitUserId)!;
-      user.owed += splitAmount;
+      userMap.get(splitUserId)!.owed += splitAmount;
     }
   }
 
@@ -247,6 +304,55 @@ export async function calculateGroupBalances(groupId: string): Promise<import(".
     receiver.owed += amount; // They received this amount (reduces their net credit)
   }
 
+  // ── Process guest settlements ──────────────────────────────────────────────
+  // When a registered member pays a guest outside the app, record it here.
+  // Effect: fromUser's owed decreases (they paid their debt to the guest),
+  //         and the guest's paid decreases by the same amount (they've been repaid).
+  const guestSettlements = await GuestSettlement.find({ group: groupId })
+    .populate("fromUser", "name email avatar")
+    .lean();
+
+  for (const gs of guestSettlements) {
+    const fromUser = gs.fromUser as any;
+    const fromUserId = String(fromUser._id);
+    const guestVirtualId = `guest::${gs.guestId}`;
+    const amount = gs.amount;
+
+    // Ensure the paying member is in the map
+    if (!userMap.has(fromUserId)) {
+      userMap.set(fromUserId, {
+        userId: fromUserId,
+        name: fromUser.name,
+        email: fromUser.email,
+        avatar: fromUser.avatar,
+        paid: 0,
+        owed: 0,
+        balance: 0,
+      });
+    }
+
+    // Ensure the guest is in the map (may not be if they have no expenses yet)
+    if (!userMap.has(guestVirtualId)) {
+      userMap.set(guestVirtualId, {
+        userId: guestVirtualId,
+        name: gs.guestName,
+        email: "",
+        avatar: undefined,
+        paid: 0,
+        owed: 0,
+        balance: 0,
+      });
+    }
+
+    // Member paid the guest → member's owed goes down (they settled their debt)
+    const member = userMap.get(fromUserId)!;
+    member.paid += amount;
+
+    // Guest received payment → guest's owed goes up (reduces their net credit)
+    const guest = userMap.get(guestVirtualId)!;
+    guest.owed += amount;
+  }
+
   // Calculate final balance for each user with proper decimal precision
   const balances = Array.from(userMap.values()).map((user) => {
     const paid = Number(user.paid.toFixed(2));
@@ -288,21 +394,24 @@ export async function validateBalanceSum(
 
 /**
  * Greedy Settlement Algorithm
- * Minimizes the number of transactions needed to settle all debts
- * Returns who should pay whom
+ * Minimizes the number of transactions needed to settle all debts.
+ * Guest virtual entries (userId starting with "guest::") ARE included as
+ * creditors so registered members can see and acknowledge debts to guests.
+ * The SettleUpButton handles guest creditors with a special "Pay Guest" flow.
  */
 export async function getSimplifiedDebts(
   balances: import("./balance-types").GroupMemberBalance[]
 ): Promise<import("./balance-types").SimplifiedDebt[]> {
-  // Separate creditors (positive balance = owed money) and debtors (negative balance = owe money)
+  // Include ALL entries — guests can be creditors (owed money by members)
   const creditors = balances
     .filter((b) => b.balance > 0)
     .map((b) => ({ ...b, balance: Number(b.balance.toFixed(2)) }))
     .sort((a, b) => b.balance - a.balance);
 
+  // Only registered members can be debtors (guests settle by claiming their account)
   const debtors = balances
-    .filter((b) => b.balance < 0)
-    .map((b) => ({ ...b, balance: Number(Math.abs(b.balance).toFixed(2)) })) // Convert to positive for easier math
+    .filter((b) => b.balance < 0 && !b.userId.startsWith("guest::"))
+    .map((b) => ({ ...b, balance: Number(Math.abs(b.balance).toFixed(2)) }))
     .sort((a, b) => b.balance - a.balance);
 
   const transactions: SimplifiedDebt[] = [];

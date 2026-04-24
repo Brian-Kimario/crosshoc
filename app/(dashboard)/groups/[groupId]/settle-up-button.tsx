@@ -16,6 +16,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
+import { formatCurrency, getCurrencySymbol, type SupportedCurrency } from "@/lib/format-utils";
 
 interface SettleUpButtonProps {
   fromUserId?: string;
@@ -24,6 +25,7 @@ interface SettleUpButtonProps {
   groupId?: string;
   fromName?: string;
   toName?: string;
+  currency?: SupportedCurrency | string;
 }
 
 export function SettleUpButton({
@@ -33,6 +35,7 @@ export function SettleUpButton({
   groupId,
   fromName = "Ower",
   toName = "Owner",
+  currency = "USD",
 }: SettleUpButtonProps) {
   const router = useRouter();
   const [isSettling, setIsSettling] = useState(false);
@@ -40,13 +43,7 @@ export function SettleUpButton({
   const [settlementAmount, setSettlementAmount] = useState<number>(amount || 0);
   const [note, setNote] = useState("");
 
-  // Format currency for display
-  const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: "USD",
-    }).format(value);
-  };
+  const symbol = getCurrencySymbol(currency);
 
   const handleSettleUp = async (method: "cash" | "digital" | "other" = "cash") => {
     if (!fromUserId || !toUserId || !groupId || settlementAmount <= 0) {
@@ -59,9 +56,7 @@ export function SettleUpButton({
       const response = await fetch(`/api/groups/${groupId}/settle`, {
         method: "POST",
         credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           fromUserId,
           toUserId,
@@ -78,10 +73,9 @@ export function SettleUpButton({
       }
 
       toast.success(
-        `Settlement recorded! ${formatCurrency(settlementAmount)} marked as paid from ${fromName} to ${toName}.`
+        `Settlement recorded! ${formatCurrency(settlementAmount, currency)} marked as paid from ${fromName} to ${toName}.`
       );
 
-      // Close dialog and refresh
       setIsOpen(false);
       router.refresh();
     } catch {
@@ -91,7 +85,6 @@ export function SettleUpButton({
     }
   };
 
-  // If no valid props, show disabled button
   if (!fromUserId || !toUserId || !groupId || !amount) {
     return (
       <Button
@@ -108,12 +101,14 @@ export function SettleUpButton({
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
-      <DialogTrigger>
-        <button className="inline-flex items-center justify-center gap-2 w-full px-3 py-2 text-sm font-medium rounded-xl border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 transition-colors">
-          <CheckCircle className="size-4" />
-          Settle Up
-        </button>
-      </DialogTrigger>
+      <DialogTrigger
+        render={
+          <button className="inline-flex items-center justify-center gap-2 w-full px-3 py-2 text-sm font-medium rounded-xl border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 transition-colors">
+            <CheckCircle className="size-4" />
+            Settle Up
+          </button>
+        }
+      />
       <DialogContent className="rounded-3xl bg-slate-900 border border-slate-700 text-white sm:max-w-[425px]">
         <DialogHeader>
           <DialogTitle className="text-white flex items-center gap-2">
@@ -126,13 +121,10 @@ export function SettleUpButton({
         </DialogHeader>
 
         <div className="space-y-4 py-4">
-          {/* Amount Input */}
           <div className="space-y-2">
-            <Label htmlFor="amount" className="text-slate-300">
-              Amount
-            </Label>
+            <Label htmlFor="amount" className="text-slate-300">Amount</Label>
             <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">$</span>
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">{symbol}</span>
               <Input
                 id="amount"
                 type="number"
@@ -141,19 +133,16 @@ export function SettleUpButton({
                 max={amount}
                 value={settlementAmount}
                 onChange={(e) => setSettlementAmount(Number(e.target.value))}
-                className="pl-7 rounded-2xl border-slate-700 bg-slate-800 text-white focus:border-emerald-500 focus:ring-emerald-500/20"
+                className="pl-10 rounded-2xl border-slate-700 bg-slate-800 text-white focus:border-emerald-500 focus:ring-emerald-500/20"
               />
             </div>
             <p className="text-xs text-slate-500">
-              Full debt: {formatCurrency(amount)}. You can edit for partial settlements.
+              Full debt: {formatCurrency(amount, currency)}. You can edit for partial settlements.
             </p>
           </div>
 
-          {/* Note Input */}
           <div className="space-y-2">
-            <Label htmlFor="note" className="text-slate-300">
-              Note (optional)
-            </Label>
+            <Label htmlFor="note" className="text-slate-300">Note (optional)</Label>
             <Input
               id="note"
               type="text"
@@ -164,15 +153,13 @@ export function SettleUpButton({
             />
           </div>
 
-          {/* Summary */}
           <div className="rounded-2xl bg-slate-800/80 border border-slate-700 p-4">
             <p className="text-sm text-slate-300">
               Confirming cash payment of{" "}
               <span className="font-semibold text-emerald-400">
-                {formatCurrency(settlementAmount)}
+                {formatCurrency(settlementAmount, currency)}
               </span>{" "}
-              from{" "}
-              <span className="font-medium text-white">{fromName}</span> to{" "}
+              from <span className="font-medium text-white">{fromName}</span> to{" "}
               <span className="font-medium text-emerald-300">{toName}</span>?
             </p>
           </div>

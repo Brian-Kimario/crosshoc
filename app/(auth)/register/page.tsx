@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, Suspense } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
@@ -9,6 +9,30 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
 export default function RegisterPage() {
+  return (
+    <Suspense fallback={<RegisterPageSkeleton />}>
+      <RegisterPageContent />
+    </Suspense>
+  );
+}
+
+function RegisterPageSkeleton() {
+  return (
+    <div className="min-h-screen bg-[#0f172a] flex items-center justify-center p-6">
+      <Card className="w-full max-w-md bg-[#1e2937] border-slate-700">
+        <CardHeader className="space-y-1 text-center">
+          <div className="flex justify-center mb-4">
+            <div className="w-12 h-12 bg-emerald-500/50 rounded-3xl flex items-center justify-center text-4xl animate-pulse">🔀</div>
+          </div>
+          <div className="h-8 bg-slate-700 rounded animate-pulse mx-auto w-48" />
+          <div className="h-4 bg-slate-800 rounded animate-pulse mx-auto w-64" />
+        </CardHeader>
+      </Card>
+    </div>
+  );
+}
+
+function RegisterPageContent() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');

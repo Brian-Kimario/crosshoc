@@ -41,6 +41,7 @@ export async function GET(
       group: {
         id: group._id,
         name: group.name,
+        currency: (group as any).currency || 'USD',
         creator: group.creator,
         members: group.members,
         inviteToken: group.inviteToken,

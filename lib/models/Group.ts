@@ -1,5 +1,7 @@
 import mongoose, { Schema, Document, Types } from 'mongoose';
 
+export type GroupCurrency = 'USD' | 'INR' | 'TZS';
+
 export interface IGroup extends Document {
   _id: Types.ObjectId;
   name: string;
@@ -10,6 +12,7 @@ export interface IGroup extends Document {
   }>;
   inviteToken?: string;
   inviteExpiresAt?: Date;
+  currency: GroupCurrency;
   createdAt: Date;
   updatedAt?: Date;
 }
@@ -34,7 +37,7 @@ const GroupSchema: Schema = new Schema({
       },
       shareRatio: {
         type: Number,
-        default: 100, // percentage
+        default: 100,
       },
     },
   ],
@@ -47,6 +50,11 @@ const GroupSchema: Schema = new Schema({
   inviteExpiresAt: {
     type: Date,
     default: null,
+  },
+  currency: {
+    type: String,
+    enum: ['USD', 'INR', 'TZS'],
+    default: 'USD',
   },
   createdAt: {
     type: Date,

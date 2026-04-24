@@ -16,7 +16,7 @@ export async function GET(
       return errorResponse("Invite token is required", 400);
     }
 
-    const group = await Group.findOne({ inviteToken: token }).select("name inviteExpiresAt");
+    const group = await Group.findOne({ inviteToken: token }).select("name inviteExpiresAt currency");
     if (!group) {
       return errorResponse("Invitation not found", 404);
     }
@@ -29,6 +29,7 @@ export async function GET(
       group: {
         id: group._id,
         name: group.name,
+        currency: (group as any).currency || 'USD',
       },
     });
   } catch {

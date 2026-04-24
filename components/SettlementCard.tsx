@@ -2,6 +2,7 @@
 
 import { CheckCircle, ArrowRight } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
+import { formatCurrency, type SupportedCurrency } from "@/lib/format-utils";
 
 interface SettlementCardProps {
   settlement: {
@@ -10,33 +11,20 @@ interface SettlementCardProps {
     method: string;
     note?: string;
     settledAt: string;
-    fromUser: {
-      name: string;
-      avatar?: string;
-    };
-    toUser: {
-      name: string;
-      avatar?: string;
-    };
+    fromUser: { name: string; avatar?: string };
+    toUser: { name: string; avatar?: string };
   };
+  currency?: SupportedCurrency | string;
 }
 
-export function SettlementCard({ settlement }: SettlementCardProps) {
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: "USD",
-    }).format(amount);
-  };
-
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleString("en-US", {
+export function SettlementCard({ settlement, currency = "USD" }: SettlementCardProps) {
+  const formatDate = (dateString: string) =>
+    new Date(dateString).toLocaleString("en-US", {
       month: "short",
       day: "numeric",
       hour: "numeric",
       minute: "2-digit",
     });
-  };
 
   return (
     <Card className="rounded-3xl border-emerald-500/30 bg-emerald-500/5 hover:bg-emerald-500/10 transition-colors">
@@ -52,7 +40,7 @@ export function SettlementCard({ settlement }: SettlementCardProps) {
             </div>
           </div>
           <p className="text-xl font-bold text-emerald-400">
-            {formatCurrency(settlement.amount)}
+            {formatCurrency(settlement.amount, currency)}
           </p>
         </div>
 

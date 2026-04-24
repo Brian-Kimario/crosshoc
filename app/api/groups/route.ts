@@ -20,6 +20,7 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json();
     const name = typeof body?.name === "string" ? body.name.trim() : "";
+    const currency = ["USD", "INR", "TZS"].includes(body?.currency) ? body.currency : "USD";
 
     if (!name) {
       return errorResponse("Group name is required", 400);
@@ -27,15 +28,11 @@ export async function POST(request: NextRequest) {
 
     const group = await Group.create({
       name,
+      currency,
       creator: userId,
-      members: [
-        {
-          user: userId,
-          shareRatio: 100,
-        },
-      ],
+      members: [{ user: userId, shareRatio: 100 }],
       inviteToken: createInviteToken(),
-      inviteExpiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      inviteExpiresAt: new Date(Date.now() + 72 * 60 * 60 * 1000), // 72 hours
     });
 
     return successResponse(
@@ -43,6 +40,7 @@ export async function POST(request: NextRequest) {
         group: {
           id: group._id,
           name: group.name,
+          currency: group.currency,
           creator: group.creator,
           inviteToken: group.inviteToken,
           inviteExpiresAt: group.inviteExpiresAt,
@@ -83,6 +81,7 @@ export async function GET(request: NextRequest) {
       groups: groups.map((group) => ({
         id: group._id,
         name: group.name,
+        currency: group.currency,
         creator: group.creator,
         members: group.members,
         inviteToken: group.inviteToken,

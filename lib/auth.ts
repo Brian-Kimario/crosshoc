@@ -4,7 +4,10 @@ import { cookies } from 'next/headers';
 import { NextRequest, NextResponse } from 'next/server';
 
 const JWT_SECRET = process.env.JWT_SECRET;
-const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
+// 30-day rolling session - user stays logged in for 30 days of inactivity
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '30d';
+const COOKIE_MAX_AGE = 30 * 24 * 60 * 60; // 30 days in seconds
+const ROLLING_REFRESH_THRESHOLD = 24 * 60 * 60; // Refresh if less than 24h remaining
 
 if (!JWT_SECRET) {
   throw new Error('JWT_SECRET is not defined in environment variables');
@@ -54,16 +57,56 @@ export function verifyToken(token: string): { userId: string } | null {
 
 /**
  * Set JWT token in httpOnly cookie
+ * 30-day rolling session - extends on each authenticated request
  */
-export async function setTokenCookie(token: string, response: NextResponse) {
+export async function setTokenCookie(token: string, response?: NextResponse) {
   const cookieStore = await cookies();
-  cookieStore.set('authToken', token, {
+  const cookieOptions = {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    maxAge: 7 * 24 * 60 * 60, // 7 days
+    sameSite: 'lax' as const,
+    maxAge: COOKIE_MAX_AGE,
     path: '/',
-  });
+  };
+  
+  cookieStore.set('authToken', token, cookieOptions);
+  
+  // If response provided, also set via NextResponse for middleware usage
+  if (response) {
+    response.cookies.set('authToken', token, cookieOptions);
+  }
+}
+
+/**
+ * Get token expiration time in seconds
+ */
+export function getTokenRemainingTime(token: string): number | null {
+  try {
+    const decoded = jwt.decode(token) as { exp?: number };
+    if (!decoded?.exp) return null;
+    return decoded.exp - Math.floor(Date.now() / 1000);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Check if token should be refreshed (rolling session)
+ * Returns true if less than 24h remaining
+ */
+export function shouldRefreshToken(token: string): boolean {
+  const remaining = getTokenRemainingTime(token);
+  if (!remaining) return false;
+  return remaining < ROLLING_REFRESH_THRESHOLD;
+}
+
+/**
+ * Refresh token with new 30-day expiration
+ */
+export function refreshToken(token: string): string | null {
+  const decoded = verifyToken(token);
+  if (!decoded) return null;
+  return signToken(decoded.userId);
 }
 
 /**
