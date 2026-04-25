@@ -1,10 +1,10 @@
 import mongoose from 'mongoose';
 
-const MONGODB_URI = process.env.DATABASE_URL_PROD || process.env.MONGODB_URI;
+const MONGODB_URI = process.env.DB_CONNECTION_STRING || process.env.MONGODB_URI;
 
 if (!MONGODB_URI) {
   throw new Error(
-    'Please define the DATABASE_URL_PROD or MONGODB_URI environment variable inside .env.local'
+    'Please define the DB_CONNECTION_STRING or MONGODB_URI environment variable inside .env.local'
   );
 }
 
