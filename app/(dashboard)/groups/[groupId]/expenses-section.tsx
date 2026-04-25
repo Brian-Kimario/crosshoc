@@ -79,7 +79,7 @@ interface ExpenseFormProps {
   members: Array<{ id: string; name: string }>;
   categories: Array<{ value: string; label: string }>;
   splitSummary: number;
-  onSubmit: (e: React.FormEvent) => void;
+  onSubmit: (e: React.FormEvent<HTMLFormElement>) => void;
   toFixedNumber: (val: string) => number;
   editingExpenseId: string | null;
 }
@@ -449,7 +449,7 @@ export function ExpensesSection({
     toast.success("Expense deleted");
   };
 
-  const onSubmit = async (e: FormEvent<HTMLFormElement>) => {
+  const onSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
     const amountValue = toFixedNumber(amount);

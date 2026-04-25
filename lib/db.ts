@@ -1,12 +1,6 @@
 import mongoose from 'mongoose';
 
-const MONGODB_URI = process.env.DB_CONNECTION_STRING || process.env.MONGODB_URI;
-
-if (!MONGODB_URI) {
-  throw new Error(
-    'Please define the DB_CONNECTION_STRING or MONGODB_URI environment variable inside .env.local'
-  );
-}
+const getMongoUri = () => process.env.DB_CONNECTION_STRING || process.env.MONGODB_URI;
 
 /**
  * Global is used here to maintain a cached connection across hot reloads
@@ -19,6 +13,14 @@ if (!cached) {
 }
 
 async function dbConnect(): Promise<typeof mongoose> {
+  const MONGODB_URI = getMongoUri();
+
+  if (!MONGODB_URI) {
+    throw new Error(
+      'Please define the DB_CONNECTION_STRING or MONGODB_URI environment variable inside .env.local'
+    );
+  }
+
   if (cached.conn) {
     return cached.conn;
   }
@@ -29,7 +31,7 @@ async function dbConnect(): Promise<typeof mongoose> {
     };
 
     cached.promise = mongoose
-      .connect(MONGODB_URI || '', opts)
+      .connect(MONGODB_URI, opts)
       .then((mongoose) => {
         return mongoose;
       });
