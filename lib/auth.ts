@@ -3,15 +3,18 @@ import bcryptjs from 'bcryptjs';
 import { cookies } from 'next/headers';
 import { NextRequest, NextResponse } from 'next/server';
 
-const JWT_SECRET = process.env.JWT_SECRET;
 // 30-day rolling session - user stays logged in for 30 days of inactivity
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '30d';
 const COOKIE_MAX_AGE = 30 * 24 * 60 * 60; // 30 days in seconds
 const ROLLING_REFRESH_THRESHOLD = 24 * 60 * 60; // Refresh if less than 24h remaining
 
-if (!JWT_SECRET) {
-  throw new Error('JWT_SECRET is not defined in environment variables');
-}
+const getJwtSecret = () => {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    throw new Error('JWT_SECRET is not defined in environment variables');
+  }
+  return secret;
+};
 
 /**
  * Hash a password using bcryptjs
@@ -35,10 +38,8 @@ export async function comparePasswords(
  * Sign a JWT token
  */
 export function signToken(userId: string): string {
-  if (!JWT_SECRET) {
-    throw new Error('JWT_SECRET is not defined');
-  }
-  return jwt.sign({ userId }, JWT_SECRET, {
+  const secret = getJwtSecret();
+  return jwt.sign({ userId }, secret, {
     expiresIn: JWT_EXPIRES_IN,
   } as any);
 }
@@ -48,7 +49,8 @@ export function signToken(userId: string): string {
  */
 export function verifyToken(token: string): { userId: string } | null {
   try {
-    const decoded = jwt.verify(token, JWT_SECRET as string) as { userId: string };
+    const secret = getJwtSecret();
+    const decoded = jwt.verify(token, secret) as { userId: string };
     return decoded;
   } catch (error) {
     return null;

@@ -89,7 +89,9 @@ export async function GET(request: NextRequest) {
         createdAt: group.createdAt,
       })),
     });
-  } catch {
-    return errorResponse("Failed to fetch groups", 500);
+  } catch (error: unknown) {
+    console.error("GET /api/groups error:", error);
+    const message = error instanceof Error ? error.message : "Unknown error";
+    return errorResponse(`Failed to fetch groups: ${message}`, 500);
   }
 }
