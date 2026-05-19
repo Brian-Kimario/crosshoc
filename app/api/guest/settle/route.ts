@@ -7,6 +7,7 @@ import dbConnect from "@/lib/db";
 import Group from "@/lib/models/Group";
 import GuestSettlement from "@/lib/models/GuestSettlement";
 import GuestSession from "@/lib/models/GuestSession";
+import { logError } from "@/lib/logger";
 
 /**
  * POST /api/guest/settle
@@ -53,7 +54,7 @@ export async function POST(request: NextRequest) {
         toUser: null,
         guestId,
         guestName: guestName || "Guest",
-        amount: Math.round((parsedAmount + Number.EPSILON) * 100) / 100,
+        amount: Math.round((parsedAmount + Number.EPSILON) * 100),  // Convert dollars to cents
         note: note || undefined,
         settledAt: new Date(),
       });
@@ -98,7 +99,7 @@ export async function POST(request: NextRequest) {
         toUser: new mongoose.Types.ObjectId(creditorId),
         guestId: sessionGuestId,
         guestName: guestSession.displayName,
-        amount: Math.round((parsedAmount + Number.EPSILON) * 100) / 100,
+        amount: Math.round((parsedAmount + Number.EPSILON) * 100),  // Convert dollars to cents
         note: note || `Payment from ${guestSession.displayName}`,
         settledAt: new Date(),
         direction: "guest_to_member",
@@ -118,7 +119,7 @@ export async function POST(request: NextRequest) {
 
     return errorResponse("Invalid request: must provide either (guestId + fromUserId) or creditorId", 400);
   } catch (err) {
-    console.error("Guest settle error:", err);
+    logError('[guest settle POST]', err);
     return errorResponse("Failed to record settlement", 500);
   }
 }

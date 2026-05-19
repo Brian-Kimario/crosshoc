@@ -6,6 +6,7 @@ import dbConnect from "@/lib/db";
 import Expense from "@/lib/models/Expense";
 import Group from "@/lib/models/Group";
 import GuestSession from "@/lib/models/GuestSession";
+import { logError } from "@/lib/logger";
 
 /**
  * POST /api/guest/claim
@@ -79,7 +80,7 @@ export async function POST(request: NextRequest) {
           (m: { user: mongoose.Types.ObjectId }) => String(m.user) === String(userId)
         );
         if (!isMember) {
-          group.members.push({ user: new mongoose.Types.ObjectId(userId), shareRatio: 100 });
+          group.members.push({ user: new mongoose.Types.ObjectId(userId), role: "member", joinedAt: new Date() });
           await group.save();
           joinedGroup = true;
         }
@@ -98,7 +99,7 @@ export async function POST(request: NextRequest) {
       message: `Successfully claimed ${migrated} expense${migrated !== 1 ? "s" : ""}${joinedGroup ? " and joined the group" : ""}`,
     });
   } catch (err) {
-    console.error("Guest claim error:", err);
+    logError('[guest claim POST]', err);
     return errorResponse("Failed to claim guest expenses", 500);
   }
 }

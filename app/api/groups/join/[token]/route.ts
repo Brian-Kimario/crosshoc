@@ -2,7 +2,11 @@ import { NextRequest } from "next/server";
 
 import { errorResponse, successResponse, unauthorizedResponse, verifyAuth } from "@/lib/auth";
 import dbConnect from "@/lib/db";
+import { logError } from "@/lib/logger";
 import Group from "@/lib/models/Group";
+import User from "@/lib/models/User";
+import { notify } from "@/lib/notify";
+import { checkRateLimit, rateLimitExceededResponse } from "@/lib/rate-limit";
 
 export async function GET(
   _request: NextRequest,
@@ -49,12 +53,17 @@ export async function POST(
       return unauthorizedResponse();
     }
 
+    const rateLimitResult = await checkRateLimit(request, 'mutation');
+    if (!rateLimitResult.success) {
+      return rateLimitExceededResponse(rateLimitResult);
+    }
+
     const { token } = await params;
     if (!token) {
       return errorResponse("Invite token is required", 400);
     }
 
-    const group = await Group.findOne({ inviteToken: token }).populate("members.user", "name email avatar");
+    const group = await Group.findOne({ inviteToken: token }).populate("members.user", "name email avatar avatarUrl");
     if (!group) {
       return errorResponse("Invitation not found", 404);
     }
@@ -70,9 +79,23 @@ export async function POST(
     if (!existingMember) {
       group.members.push({
         user: userId,
-        shareRatio: 100,
+        role: "member",
+        joinedAt: new Date(),
       });
       await group.save();
+
+      // Notify the group creator that a new member joined
+      const joiner = await User.findById(userId).select("name").lean() as any;
+      const joinerName = joiner?.name ?? "Someone";
+
+      await notify({
+        userId:    String(group.creator),
+        type:      "member_joined",
+        title:     "New member joined",
+        body:      `${joinerName} joined ${group.name}`,
+        groupId:   String(group._id),
+        actorName: joinerName,
+      });
     }
 
     return successResponse({
@@ -81,7 +104,8 @@ export async function POST(
         name: group.name,
       },
     });
-  } catch {
+  } catch (error) {
+    logError('[join group POST]', error);
     return errorResponse("Failed to join group", 500);
   }
 }

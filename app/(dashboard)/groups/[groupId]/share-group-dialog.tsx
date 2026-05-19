@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import { Share2, RefreshCw, Clock, Copy, QrCode } from "lucide-react";
+import { Share2, RefreshCw, Clock, Copy, QrCode, Smartphone, Mail, Send } from "lucide-react";
 import { toast } from "sonner";
 import { QRCodeSVG } from "qrcode.react";
 
@@ -47,6 +47,9 @@ export function ShareGroupDialog({ groupId, inviteToken, inviteExpiresAt }: Shar
   const [refreshing, setRefreshing] = useState(false);
   const [open, setOpen] = useState(false);
   const [showQR, setShowQR] = useState(false);
+  const [emailInput, setEmailInput] = useState("");
+  const [nameInput, setNameInput] = useState("");
+  const [sendingEmail, setSendingEmail] = useState(false);
 
   const isExpired = useMemo(() => {
     if (!currentExpiry) return false;
@@ -86,6 +89,28 @@ export function ShareGroupDialog({ groupId, inviteToken, inviteExpiresAt }: Shar
     toast.success("Magic link copied");
   };
 
+  // Native share API for mobile
+  const canNativeShare = typeof navigator !== "undefined" && "share" in navigator;
+
+  const nativeShare = async () => {
+    if (!canNativeShare) {
+      toast.error("Sharing not supported on this device");
+      return;
+    }
+    try {
+      await navigator.share({
+        title: "Join my group on SplitEasy",
+        text: "Let's split expenses together! Join my group on SplitEasy.",
+        url: magicLink,
+      });
+    } catch (err) {
+      // User cancelled share - no need to show error
+      if ((err as Error).name !== "AbortError") {
+        toast.error("Failed to share");
+      }
+    }
+  };
+
   const refreshLink = useCallback(async () => {
     setRefreshing(true);
     try {
@@ -104,6 +129,35 @@ export function ShareGroupDialog({ groupId, inviteToken, inviteExpiresAt }: Shar
       setRefreshing(false);
     }
   }, [groupId]);
+
+  const sendEmailInvite = useCallback(async () => {
+    const email = emailInput.trim();
+    if (!email) { toast.error("Enter an email address"); return; }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) { toast.error("Enter a valid email address"); return; }
+
+    setSendingEmail(true);
+    try {
+      const res = await fetch(`/api/groups/${groupId}/invite/share`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          recipientEmail: email,
+          recipientName: nameInput.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) { toast.error(data.error || "Failed to send invite"); return; }
+      toast.success(`Invite sent to ${email}`);
+      setEmailInput("");
+      setNameInput("");
+    } catch {
+      toast.error("Failed to send invite email");
+    } finally {
+      setSendingEmail(false);
+    }
+  }, [groupId, emailInput, nameInput]);
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -200,7 +254,16 @@ export function ShareGroupDialog({ groupId, inviteToken, inviteExpiresAt }: Shar
               {refreshing ? "Generating..." : "Generate New Link"}
             </Button>
           ) : (
-            <div className="flex gap-2">
+            <div className="flex flex-col sm:flex-row gap-2">
+              {canNativeShare && (
+                <Button
+                  onClick={nativeShare}
+                  className="flex-1 rounded-3xl bg-emerald-500 hover:bg-emerald-600 sm:hidden"
+                >
+                  <Smartphone className="size-4 mr-2" />
+                  Share
+                </Button>
+              )}
               <Button
                 onClick={copyLink}
                 className="flex-1 rounded-3xl bg-emerald-500 hover:bg-emerald-600"
@@ -219,6 +282,44 @@ export function ShareGroupDialog({ groupId, inviteToken, inviteExpiresAt }: Shar
               </Button>
             </div>
           )}
+
+          {/* Email invite section */}
+          <div className="pt-3 border-t border-slate-700/50">
+            <p className="text-sm font-medium text-slate-300 mb-2 flex items-center gap-2">
+              <Mail className="size-4 text-emerald-400" />
+              Send invite by email
+            </p>
+            <div className="space-y-2">
+              <Input
+                type="text"
+                placeholder="Name (optional)"
+                value={nameInput}
+                onChange={(e) => setNameInput(e.target.value)}
+                className="bg-slate-950 border-slate-700 text-slate-200 placeholder:text-slate-500"
+              />
+              <div className="flex gap-2">
+                <Input
+                  type="email"
+                  placeholder="friend@email.com"
+                  value={emailInput}
+                  onChange={(e) => setEmailInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") sendEmailInvite(); }}
+                  className="bg-slate-950 border-slate-700 text-slate-200 placeholder:text-slate-500 flex-1"
+                />
+                <Button
+                  onClick={sendEmailInvite}
+                  disabled={sendingEmail || !emailInput.trim()}
+                  className="rounded-3xl bg-emerald-500 hover:bg-emerald-600 text-white shrink-0"
+                >
+                  {sendingEmail ? (
+                    <RefreshCw className="size-4 animate-spin" />
+                  ) : (
+                    <Send className="size-4" />
+                  )}
+                </Button>
+              </div>
+            </div>
+          </div>
         </div>
       </DialogContent>
     </Dialog>

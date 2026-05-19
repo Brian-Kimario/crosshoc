@@ -3,19 +3,28 @@ import dbConnect from '@/lib/db';
 import User from '@/lib/models/User';
 import Expense from '@/lib/models/Expense';
 import { hashPassword, signToken, errorResponse, successResponse } from '@/lib/auth';
+import { checkRateLimit, rateLimitExceededResponse } from '@/lib/rate-limit';
+import { parseBody, RegisterSchema } from '@/lib/validations';
+import { logError } from '@/lib/logger';
+import { sendEmail } from '@/lib/email';
+import { WelcomeEmail } from '@/emails/WelcomeEmail';
 
 export async function POST(request: NextRequest) {
+  // 1. Rate limit check — must be first
+  const rateLimitResult = await checkRateLimit(request, 'auth');
+  if (!rateLimitResult.success) {
+    return rateLimitExceededResponse(rateLimitResult);
+  }
+
   try {
     await dbConnect();
 
-    const { name, email, password, guestId } = await request.json();
-
-    if (!name || !email || !password) {
-      return errorResponse('Name, email, and password are required', 400);
+    // 2. Zod validation — replaces manual field checks
+    const parsed = parseBody(RegisterSchema, await request.json());
+    if (!parsed.success) {
+      return parsed.response;
     }
-    if (password.length < 6) {
-      return errorResponse('Password must be at least 6 characters', 400);
-    }
+    const { name, email, password, guestId } = parsed.data;
 
     const existingUser = await User.findOne({ email });
     if (existingUser) return errorResponse('Email already registered', 409);
@@ -23,6 +32,16 @@ export async function POST(request: NextRequest) {
     const hashedPassword = await hashPassword(password);
     const newUser = new User({ name, email, password: hashedPassword });
     await newUser.save();
+
+    // Send welcome email (fire-and-forget, no prefsKey — always sent)
+    void sendEmail({
+      to: email,
+      subject: 'Welcome to SplitEasy!',
+      react: WelcomeEmail({
+        name: newUser.name,
+        dashboardUrl: (process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000') + '/',
+      }),
+    });
 
     // Migrate guest expenses if guestId provided
     if (guestId && typeof guestId === 'string') {
@@ -38,12 +57,13 @@ export async function POST(request: NextRequest) {
           await expense.save();
         }
       } catch (claimErr) {
-        console.error('Guest claim during register failed:', claimErr);
+        logError('[register route] guest claim', claimErr);
         // Non-fatal
       }
     }
 
-    const token = signToken(newUser._id.toString());
+    // 3. Pass tokenVersion (defaults to 0 on creation)
+    const token = signToken(newUser._id.toString(), newUser.tokenVersion);
 
     const response = successResponse(
       { user: { id: newUser._id, name: newUser.name, email: newUser.email } },
@@ -63,8 +83,9 @@ export async function POST(request: NextRequest) {
     response.cookies.set('guestName', '', { maxAge: 0, path: '/' });
 
     return response;
-  } catch (error: any) {
-    console.error('Register error:', error);
-    return errorResponse(error.message || 'Registration failed', 500);
+  } catch (error: unknown) {
+    // 4. Structured logging; 5. Generic error message (no raw error.message)
+    logError('[register route]', error);
+    return errorResponse('Registration failed', 500);
   }
 }

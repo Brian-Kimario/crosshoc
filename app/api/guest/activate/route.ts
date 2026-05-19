@@ -3,18 +3,24 @@ import crypto from "crypto";
 import dbConnect from "@/lib/db";
 import { validateInviteToken } from "@/lib/invites";
 import GuestSession from "@/lib/models/GuestSession";
+import { checkRateLimit, rateLimitExceededResponse } from "@/lib/rate-limit";
+import { parseBody, GuestActivateSchema } from "@/lib/validations";
+import { logError } from "@/lib/logger";
 
 export async function POST(req: NextRequest) {
+  const rateLimitResult = await checkRateLimit(req, "auth");
+  if (!rateLimitResult.success) {
+    return rateLimitExceededResponse(rateLimitResult);
+  }
+
   try {
     await dbConnect();
-    const { token, displayName } = await req.json();
 
-    if (!token || !displayName?.trim()) {
-      return NextResponse.json(
-        { error: "Missing required fields" },
-        { status: 400 }
-      );
+    const parsed = parseBody(GuestActivateSchema, await req.json());
+    if (!parsed.success) {
+      return parsed.response;
     }
+    const { token, displayName } = parsed.data;
 
     const result = await validateInviteToken(token);
     if (!result.valid) {
@@ -47,7 +53,8 @@ export async function POST(req: NextRequest) {
     });
 
     return res;
-  } catch {
+  } catch (error) {
+    logError("[guest activate]", error);
     return NextResponse.json(
       { error: "Failed to activate guest session" },
       { status: 500 }

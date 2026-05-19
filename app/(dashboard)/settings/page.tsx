@@ -1,30 +1,22 @@
-"use client";
+import { verifyAuth } from "@/lib/auth";
+import { redirect } from "next/navigation";
+import { SettingsClient } from "@/components/settings/SettingsClient";
 
-import { motion } from "framer-motion";
-import { Settings, Clock } from "lucide-react";
+export const metadata = { title: "Settings — SplitEasy" };
 
-export default function SettingsPage() {
+export default async function SettingsPage({
+  searchParams,
+}: {
+  searchParams: { tab?: string; success?: string; error?: string };
+}) {
+  const userId = await verifyAuth();
+  if (!userId) redirect("/login");
+
   return (
-    <div className="min-h-screen bg-[#0F172A] p-6">
-      <div className="max-w-4xl mx-auto">
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="bg-slate-800/50 border border-slate-700 rounded-2xl p-8 text-center"
-        >
-          <div className="w-16 h-16 bg-emerald-500/20 rounded-2xl flex items-center justify-center mx-auto mb-4">
-            <Settings className="w-8 h-8 text-emerald-400" />
-          </div>
-          <h1 className="text-2xl font-bold text-white mb-2">Settings</h1>
-          <p className="text-slate-400 mb-6">
-            Manage your account preferences and app settings.
-          </p>
-          <div className="flex items-center justify-center gap-2 text-sm text-slate-500">
-            <Clock className="w-4 h-4" />
-            <span>Coming Soon</span>
-          </div>
-        </motion.div>
-      </div>
-    </div>
+    <SettingsClient
+      initialTab={searchParams.tab ?? "profile"}
+      successMessage={searchParams.success}
+      errorMessage={searchParams.error}
+    />
   );
 }

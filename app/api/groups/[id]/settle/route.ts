@@ -1,104 +1,133 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyAuth } from "@/lib/auth";
+import mongoose from "mongoose";
+
+import { verifyAuth, errorResponse, successResponse, unauthorizedResponse } from "@/lib/auth";
 import dbConnect from "@/lib/db";
 import Group from "@/lib/models/Group";
 import Settlement from "@/lib/models/Settlement";
-import mongoose from "mongoose";
+import User from "@/lib/models/User";
+import { formatMoney } from "@/lib/money";
+import { logAction } from "@/lib/audit";
+import { invalidateBalanceCache } from "@/lib/balance-cache";
+import { notify } from "@/lib/notify";
+import { checkRateLimit, rateLimitExceededResponse } from "@/lib/rate-limit";
+import { parseBody, CreateSettlementSchema } from "@/lib/validations";
+import { logError } from "@/lib/logger";
 
-// POST /api/groups/[id]/settle - Record a settlement payment
+/**
+ * POST /api/groups/[id]/settle
+ * Records a settlement payment between two group members.
+ * Supports idempotency via optional `idempotencyKey`.
+ * New settlements start as "pending" — balance only updates on confirmation.
+ */
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const userId = await verifyAuth();
-    if (!userId) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    await dbConnect();
+
+    const userId = await verifyAuth(request);
+    if (!userId) return unauthorizedResponse();
+
+    const rateLimitResult = await checkRateLimit(request, 'mutation');
+    if (!rateLimitResult.success) return rateLimitExceededResponse(rateLimitResult);
 
     const { id: groupId } = await params;
     const body = await request.json();
-    const { fromUserId, toUserId, amount, method = "cash", note } = body;
 
-    // Validate required fields
-    if (!fromUserId || !toUserId || !amount) {
-      return NextResponse.json(
-        { error: "Missing required fields: fromUserId, toUserId, amount" },
-        { status: 400 }
-      );
+    const parsed = parseBody(CreateSettlementSchema, body);
+    if (!parsed.success) return parsed.response;
+
+    const { fromUserId, toUserId, amount, method = "cash", note, idempotencyKey } = parsed.data;
+
+    // Idempotency check — return existing record if key already used
+    if (idempotencyKey) {
+      const existing = await Settlement.findOne({ idempotencyKey })
+        .populate("fromUser", "name email avatar avatarUrl")
+        .populate("toUser", "name email avatar avatarUrl")
+        .lean();
+      if (existing) {
+        return NextResponse.json({ settlement: existing, idempotent: true }, { status: 200 });
+      }
     }
 
-    // Validate amount
-    if (typeof amount !== "number" || amount <= 0) {
-      return NextResponse.json(
-        { error: "Amount must be a positive number" },
-        { status: 400 }
-      );
-    }
-
-    // Round to 2 decimal places
-    const roundedAmount = Number(amount.toFixed(2));
-
-    await dbConnect();
-
-    // Verify group exists and user is a member
-    const group = await Group.findById(groupId);
-    if (!group) {
-      return NextResponse.json({ error: "Group not found" }, { status: 404 });
-    }
+    const group = await Group.findById(groupId).select("members currency");
+    if (!group) return NextResponse.json({ error: "Group not found" }, { status: 404 });
 
     const isMember = group.members.some(
-      (member: { user: mongoose.Types.ObjectId }) =>
-        String(member.user) === String(userId)
+      (m: any) => String(m.user) === String(userId)
     );
     if (!isMember) {
-      return NextResponse.json(
-        { error: "You are not a member of this group" },
-        { status: 403 }
-      );
+      return NextResponse.json({ error: "You are not a member of this group" }, { status: 403 });
     }
 
-    // Verify both users are group members
-    const fromUserIsMember = group.members.some(
-      (member: { user: mongoose.Types.ObjectId }) =>
-        String(member.user) === String(fromUserId)
-    );
-    const toUserIsMember = group.members.some(
-      (member: { user: mongoose.Types.ObjectId }) =>
-        String(member.user) === String(toUserId)
-    );
-
-    if (!fromUserIsMember || !toUserIsMember) {
-      return NextResponse.json(
-        { error: "Both users must be members of the group" },
-        { status: 400 }
-      );
+    const memberIds = group.members.map((m: any) => String(m.user));
+    if (!memberIds.includes(String(fromUserId)) || !memberIds.includes(String(toUserId))) {
+      return NextResponse.json({ error: "Both users must be members of the group" }, { status: 400 });
     }
 
-    // Create the settlement record
+    const currency: string = group.currency || "USD";
+
+    // amount is sent as INTEGER CENTS from the client (settle-up-button.tsx)
+    // Validated by CreateSettlementSchema (integer, positive)
+    const amountCents = amount;
+
     const settlement = await Settlement.create({
-      group: groupId,
-      fromUser: fromUserId,
-      toUser: toUserId,
-      amount: roundedAmount,
+      group: new mongoose.Types.ObjectId(groupId),
+      fromUser: new mongoose.Types.ObjectId(fromUserId),
+      toUser: new mongoose.Types.ObjectId(toUserId),
+      amount: amountCents,
       method,
       note: note || undefined,
+      status: "pending",
+      idempotencyKey: idempotencyKey || undefined,
       settledAt: new Date(),
     });
 
-    // Populate user details for response
+    // NOTE: pending settlements do NOT invalidate balance cache.
+    // Cache is only invalidated on confirmation.
+
     await settlement.populate([
-      { path: "fromUser", select: "name email avatar" },
-      { path: "toUser", select: "name email avatar" },
+      { path: "fromUser", select: "name email avatar avatarUrl" },
+      { path: "toUser", select: "name email avatar avatarUrl" },
     ]);
+
+    const actor = await User.findById(userId).select("name").lean() as any;
+    const actorName = actor?.name ?? userId;
+
+    await logAction({
+      action: "settlement.created",
+      actorId: userId,
+      actorName,
+      groupId,
+      resourceId: String(settlement._id),
+      after: { fromUserId, toUserId, amount: amountCents, status: "pending" },
+      ipAddress: request.headers.get("x-forwarded-for") ?? undefined,
+    });
+
+    // Notify the CREDITOR (toUser) — they need to confirm
+    await notify({
+      userId:     String(toUserId),
+      type:       "settlement_made",
+      title:      "Payment received — confirm?",
+      body:       `${actorName} says they paid you ${formatMoney(amountCents, currency)} in ${group.name}`,
+      groupId,
+      actorName,
+      amount:     amountCents,
+      currency,
+      resourceId: String(settlement._id),
+      metadata:   { settlementId: String(settlement._id) },
+    });
 
     return NextResponse.json(
       {
-        message: "Settlement recorded successfully",
+        message: "Settlement recorded — awaiting confirmation",
         settlement: {
           _id: settlement._id,
           amount: settlement.amount,
           method: settlement.method,
+          status: settlement.status,
           fromUser: settlement.fromUser,
           toUser: settlement.toUser,
           settledAt: settlement.settledAt,
@@ -107,59 +136,48 @@ export async function POST(
       { status: 201 }
     );
   } catch (error) {
-    console.error("Settlement error:", error);
-    return NextResponse.json(
-      { error: "Failed to record settlement" },
-      { status: 500 }
-    );
+    logError('[settle POST]', error);
+    return NextResponse.json({ error: "Failed to record settlement" }, { status: 500 });
   }
 }
 
-// GET /api/groups/[id]/settle - Get all settlements for a group
+/**
+ * GET /api/groups/[id]/settle
+ * Returns all settlements for a group (all statuses for display).
+ */
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const userId = await verifyAuth();
-    if (!userId) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    await dbConnect();
+
+    const userId = await verifyAuth(request);
+    if (!userId) return unauthorizedResponse();
 
     const { id: groupId } = await params;
 
-    await dbConnect();
-
-    // Verify group exists and user is a member
-    const group = await Group.findById(groupId);
-    if (!group) {
-      return NextResponse.json({ error: "Group not found" }, { status: 404 });
-    }
+    const group = await Group.findById(groupId).select("members");
+    if (!group) return NextResponse.json({ error: "Group not found" }, { status: 404 });
 
     const isMember = group.members.some(
-      (member: { user: mongoose.Types.ObjectId }) =>
-        String(member.user) === String(userId)
+      (m: any) => String(m.user) === String(userId)
     );
     if (!isMember) {
-      return NextResponse.json(
-        { error: "You are not a member of this group" },
-        { status: 403 }
-      );
+      return NextResponse.json({ error: "You are not a member of this group" }, { status: 403 });
     }
 
-    // Get all settlements for the group
     const settlements = await Settlement.find({ group: groupId })
-      .populate("fromUser", "name email avatar")
-      .populate("toUser", "name email avatar")
+      .select("fromUser toUser amount method note status settledAt confirmedAt")
+      .populate("fromUser", "name email avatar avatarUrl")
+      .populate("toUser", "name email avatar avatarUrl")
       .sort({ settledAt: -1 })
+      .limit(100)
       .lean();
 
     return NextResponse.json({ settlements });
   } catch (error) {
-    console.error("Get settlements error:", error);
-    return NextResponse.json(
-      { error: "Failed to fetch settlements" },
-      { status: 500 }
-    );
+    logError('[settle GET]', error);
+    return NextResponse.json({ error: "Failed to fetch settlements" }, { status: 500 });
   }
 }

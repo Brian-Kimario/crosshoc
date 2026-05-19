@@ -8,6 +8,7 @@ export interface IInviteToken extends Document {
   expiresAt: Date;
   usedAt?: Date;
   multiUse: boolean;
+  expiringSoonEmailSentAt?: Date | null;
 }
 
 const InviteTokenSchema: Schema = new Schema({
@@ -42,6 +43,11 @@ const InviteTokenSchema: Schema = new Schema({
   multiUse: {
     type: Boolean,
     default: true,
+  },
+  expiringSoonEmailSentAt: {
+    type: Date,
+    default: null,
+    index: true,
   },
 });
 

@@ -2,6 +2,8 @@ import { NextRequest } from 'next/server';
 import dbConnect from '@/lib/db';
 import User from '@/lib/models/User';
 import { verifyAuth, unauthorizedResponse, successResponse } from '@/lib/auth';
+import { SAFE_USER_FIELDS } from '@/lib/sanitize';
+import { logError } from '@/lib/logger';
 
 export async function GET(request: NextRequest) {
   try {
@@ -12,7 +14,7 @@ export async function GET(request: NextRequest) {
       return unauthorizedResponse();
     }
 
-    const user = await User.findById(userId);
+    const user = await User.findById(userId).select(SAFE_USER_FIELDS);
     if (!user) {
       return unauthorizedResponse();
     }
@@ -25,7 +27,7 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (error: any) {
-    console.error('Me endpoint error:', error);
+    logError('[auth me GET]', error);
     return unauthorizedResponse();
   }
 }

@@ -5,6 +5,14 @@ import { errorResponse, successResponse, unauthorizedResponse, verifyAuth } from
 import dbConnect from "@/lib/db";
 import Expense from "@/lib/models/Expense";
 import Group from "@/lib/models/Group";
+import User from "@/lib/models/User";
+import { toCents, distributeEvenly, distributeByPercentage, validateExactSplits, fromCents, formatMoney } from "@/lib/money";
+import { validateSplits } from "@/lib/validate-splits";
+import { logAction } from "@/lib/audit";
+import { invalidateBalanceCache } from "@/lib/balance-cache";
+import { notify } from "@/lib/notify";
+import { checkRateLimit, rateLimitExceededResponse } from "@/lib/rate-limit";
+import { logError } from "@/lib/logger";
 
 type SplitType = "equal" | "percentage" | "exact";
 
@@ -13,91 +21,18 @@ type CustomSplit = {
   value: number;
 };
 
-const EPSILON = 0.01;
-
-function roundToCents(value: number) {
-  return Math.round((value + Number.EPSILON) * 100) / 100;
-}
-
-function normalizeEqual(memberIds: string[], amount: number) {
-  const base = Math.floor((amount * 100) / memberIds.length);
-  const remainder = Math.round(amount * 100) - base * memberIds.length;
-
-  return memberIds.map((memberId, index) => ({
-    user: memberId,
-    amount: roundToCents((base + (index < remainder ? 1 : 0)) / 100),
-  }));
-}
-
-function normalizePercentage(
-  memberIds: string[],
-  customSplits: CustomSplit[],
-  amount: number
-) {
-  if (customSplits.length !== memberIds.length) {
-    throw new Error("Please provide percentages for every group member.");
-  }
-
-  const percentTotal = roundToCents(
-    customSplits.reduce((sum, split) => sum + Number(split.value || 0), 0)
-  );
-  if (Math.abs(percentTotal - 100) > EPSILON) {
-    throw new Error("Math doesn't add up! Percentages must total exactly 100.");
-  }
-
-  const perUser = new Map(customSplits.map((split) => [String(split.user), Number(split.value)]));
-  return memberIds.map((memberId) => {
-    if (!perUser.has(memberId)) {
-      throw new Error("Every group member needs a percentage value.");
-    }
-    const percent = perUser.get(memberId) || 0;
-    return {
-      user: memberId,
-      amount: roundToCents((amount * percent) / 100),
-    };
-  });
-}
-
-function normalizeExact(memberIds: string[], customSplits: CustomSplit[], amount: number) {
-  if (customSplits.length !== memberIds.length) {
-    throw new Error("Please provide exact amounts for every group member.");
-  }
-
-  const total = roundToCents(customSplits.reduce((sum, split) => sum + Number(split.value || 0), 0));
-  if (Math.abs(total - amount) > EPSILON) {
-    throw new Error(`Math doesn't add up! Splits total ${total.toFixed(2)} for ${amount.toFixed(2)}.`);
-  }
-
-  const perUser = new Map(customSplits.map((split) => [String(split.user), Number(split.value)]));
-  return memberIds.map((memberId) => {
-    if (!perUser.has(memberId)) {
-      throw new Error("Every group member needs an amount value.");
-    }
-    return {
-      user: memberId,
-      amount: roundToCents(perUser.get(memberId) || 0),
-    };
-  });
-}
-
 async function loadGroupForMember(groupId: string, userId: string) {
-  if (!mongoose.Types.ObjectId.isValid(groupId)) {
-    return null;
-  }
+  if (!mongoose.Types.ObjectId.isValid(groupId)) return null;
 
-  const group = await Group.findById(groupId).select("members");
-  if (!group) {
-    return null;
-  }
+  const group = await Group.findById(groupId)
+    .select("members currency status")
+    .lean() as any;
+  if (!group) return null;
 
   const isMember = group.members.some(
-    (member: { user: mongoose.Types.ObjectId }) => String(member.user) === String(userId)
+    (m: any) => String(m.user) === String(userId)
   );
-  if (!isMember) {
-    return undefined;
-  }
-
-  return group;
+  return isMember ? group : undefined;
 }
 
 export async function POST(request: NextRequest) {
@@ -105,23 +40,23 @@ export async function POST(request: NextRequest) {
     await dbConnect();
 
     const authUserId = await verifyAuth(request);
-    if (!authUserId) {
-      return unauthorizedResponse();
-    }
+    if (!authUserId) return unauthorizedResponse();
+
+    const rateLimitResult = await checkRateLimit(request, 'mutation');
+    if (!rateLimitResult.success) return rateLimitExceededResponse(rateLimitResult);
 
     const body = await request.json();
-    const groupId = String(body?.groupId || "");
+    const groupId    = String(body?.groupId || "");
     const description = String(body?.description || "").trim();
-    const amount = Number(body?.amount);
-    const paidBy = String(body?.paidBy || "");
-    const splitType = String(body?.splitType || "equal") as SplitType;
-    const category = String(body?.category || "other").trim();
+    const rawAmount  = Number(body?.amount);
+    const paidBy     = String(body?.paidBy || "");
+    const splitType  = String(body?.splitType || "equal") as SplitType;
+    const category   = String(body?.category || "other").trim();
     const customSplits: CustomSplit[] = Array.isArray(body?.customSplits) ? body.customSplits : [];
+    const receiptUrl = body?.receiptUrl ? String(body.receiptUrl) : undefined;
 
-    if (!description) {
-      return errorResponse("Description is required.", 400);
-    }
-    if (!Number.isFinite(amount) || amount <= 0) {
+    if (!description) return errorResponse("Description is required.", 400);
+    if (!Number.isFinite(rawAmount) || rawAmount <= 0) {
       return errorResponse("Amount must be greater than zero.", 400);
     }
     if (!["equal", "percentage", "exact"].includes(splitType)) {
@@ -132,60 +67,136 @@ export async function POST(request: NextRequest) {
     }
 
     const group = await loadGroupForMember(groupId, authUserId);
-    if (group === null) {
-      return errorResponse("Group not found.", 404);
-    }
-    if (group === undefined) {
-      return unauthorizedResponse();
+    if (group === null) return errorResponse("Group not found.", 404);
+    if (group === undefined) return unauthorizedResponse();
+
+    if (group.status === "archived") {
+      return errorResponse("Cannot add expenses to an archived group", 403);
     }
 
-    const memberIds = group.members.map((member: { user: mongoose.Types.ObjectId }) => String(member.user));
+    const currency: string = group.currency || "USD";
+    const memberIds: string[] = group.members.map((m: any) => String(m.user));
+
     if (!memberIds.includes(paidBy)) {
       return errorResponse("paidBy must belong to the selected group.", 400);
     }
 
-    let splits: Array<{ user: string; amount: number }> = [];
-    const roundedAmount = roundToCents(amount);
+    // Convert to integer cents
+    const amountCents = toCents(rawAmount, currency);
+    const payerIndex  = memberIds.indexOf(paidBy);
+
+    // Build splits in cents using the money utility
+    let splitCents: number[];
     try {
       if (splitType === "equal") {
-        splits = normalizeEqual(memberIds, roundedAmount);
+        // Use customSplits to determine which members are included (non-zero value = included)
+        // If no customSplits provided, fall back to all members
+        const includedIds = customSplits.length > 0
+          ? customSplits.filter((s) => s.value > 0).map((s) => String(s.user))
+          : memberIds;
+        const includedCount = includedIds.length > 0 ? includedIds.length : memberIds.length;
+        const finalIncludedIds = includedIds.length > 0 ? includedIds : memberIds;
+        const evenCents = distributeEvenly(amountCents, includedCount, 0);
+        splitCents = memberIds.map((id) => {
+          const idx = finalIncludedIds.indexOf(id);
+          return idx >= 0 ? evenCents[idx] : 0;
+        });
       } else if (splitType === "percentage") {
-        splits = normalizePercentage(memberIds, customSplits, roundedAmount);
+        if (customSplits.length !== memberIds.length) {
+          return errorResponse("Please provide percentages for every group member.", 400);
+        }
+        const percentages = memberIds.map((id) => {
+          const cs = customSplits.find((s) => String(s.user) === id);
+          return cs ? Number(cs.value) : 0;
+        });
+        splitCents = distributeByPercentage(amountCents, percentages);
       } else {
-        splits = normalizeExact(memberIds, customSplits, roundedAmount);
+        // exact — client sends display amounts, we convert to cents
+        if (customSplits.length !== memberIds.length) {
+          return errorResponse("Please provide exact amounts for every group member.", 400);
+        }
+        splitCents = memberIds.map((id) => {
+          const cs = customSplits.find((s) => String(s.user) === id);
+          return toCents(cs ? Number(cs.value) : 0, currency);
+        });
+        const { valid, diff } = validateExactSplits(amountCents, splitCents);
+        if (!valid) {
+          return errorResponse(
+            `Exact splits sum to ${formatMoney(amountCents - diff, currency)} ` +
+              `but expense is ${formatMoney(amountCents, currency)}. ` +
+              `Difference: ${formatMoney(Math.abs(diff), currency)}`,
+            400
+          );
+        }
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Invalid split input.";
-      return errorResponse(message, 400);
+      return errorResponse(err instanceof Error ? err.message : "Invalid split input.", 400);
     }
 
-    const splitTotal = roundToCents(splits.reduce((sum, split) => sum + split.amount, 0));
-    if (Math.abs(splitTotal - roundedAmount) > EPSILON) {
-      return errorResponse(
-        `Math doesn't add up! Splits total ${splitTotal.toFixed(2)} for ${roundedAmount.toFixed(2)}.`,
-        400
-      );
+    // Server-side split validation
+    const splitInputs = memberIds.map((id, i) => ({ userId: id, amountCents: splitCents[i] }));
+    const validation = validateSplits(amountCents, splitInputs, splitType, currency);
+    if (!validation.valid) {
+      return errorResponse(`Invalid splits: ${validation.errors.join("; ")}`, 400);
     }
+
+    const splits = memberIds.map((id, i) => ({ user: id, amount: splitCents[i] }));
 
     const expense = await Expense.create({
       group: groupId,
       description,
-      amount: roundedAmount,
+      amount: amountCents,
       category: category || "other",
       splitType,
       paidBy,
       createdBy: authUserId,
       splits,
+      receiptUrl,
+      currency,
     });
 
+    // Invalidate balance cache
+    await invalidateBalanceCache(groupId);
+
+    // Audit log
+    const actor = await User.findById(authUserId).select("name").lean() as any;
+    const actorName = actor?.name ?? authUserId;
+
+    await logAction({
+      action: "expense.created",
+      actorId: authUserId,
+      actorName,
+      groupId,
+      resourceId: String(expense._id),
+      after: { description, amount: amountCents, currency, splitType },
+      ipAddress: request.headers.get("x-forwarded-for") ?? undefined,
+    });
+
+    // Notify each split participant (excluding the actor)
+    for (const split of splits) {
+      if (String(split.user) === authUserId) continue;
+      await notify({
+        userId:     String(split.user),
+        type:       "expense_added",
+        title:      "New expense added",
+        body:       `${actorName} added "${description}" — your share: ${formatMoney(split.amount, currency)}`,
+        groupId,
+        actorName,
+        amount:     split.amount,
+        currency,
+        resourceId: String(expense._id),
+      });
+    }
+
     const populated = await Expense.findById(expense._id)
-      .populate("paidBy", "name email avatar")
+      .populate("paidBy", "name email avatar avatarUrl")
       .populate("createdBy", "name email")
-      .populate("splits.user", "name email avatar")
+      .populate("splits.user", "name email avatar avatarUrl")
       .lean();
 
     return successResponse({ expense: populated }, 201);
-  } catch {
+  } catch (error: unknown) {
+    logError('[expenses POST]', error);
     return errorResponse("Failed to create expense.", 500);
   }
 }
@@ -195,34 +206,27 @@ export async function GET(request: NextRequest) {
     await dbConnect();
 
     const authUserId = await verifyAuth(request);
-    if (!authUserId) {
-      return unauthorizedResponse();
-    }
+    if (!authUserId) return unauthorizedResponse();
 
     const groupId = request.nextUrl.searchParams.get("groupId");
-    if (!groupId) {
-      return errorResponse("groupId query param is required.", 400);
-    }
+    if (!groupId) return errorResponse("groupId query param is required.", 400);
 
     const group = await loadGroupForMember(groupId, authUserId);
-    if (group === null) {
-      return errorResponse("Group not found.", 404);
-    }
-    if (group === undefined) {
-      return unauthorizedResponse();
-    }
+    if (group === null) return errorResponse("Group not found.", 404);
+    if (group === undefined) return unauthorizedResponse();
 
     const expenses = await Expense.find({ group: groupId })
-      .populate("paidBy", "name email avatar")
+      .select("description amount paidBy isGuest guestName guestId guestShare splits splitType category createdAt receiptUrl createdBy currency")
+      .populate("paidBy", "name email avatar avatarUrl")
       .populate("createdBy", "name email")
-      .populate("splits.user", "name email avatar")
+      .populate("splits.user", "name email avatar avatarUrl")
       .sort({ createdAt: -1 })
+      .limit(200)
       .lean();
 
-    // Re-attach guest fields that .populate().lean() preserves but we make explicit
     const shaped = expenses.map((e: any) => ({
       ...e,
-      isGuest: e.isGuest ?? false,
+      isGuest:   e.isGuest ?? false,
       guestName: e.guestName ?? null,
     }));
 

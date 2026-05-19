@@ -5,12 +5,18 @@ import { errorResponse, unauthorizedResponse, verifyAuth } from "@/lib/auth";
 import dbConnect from "@/lib/db";
 import Expense from "@/lib/models/Expense";
 import Group from "@/lib/models/Group";
+import { fromCents } from "@/lib/money";
+import { logError } from "@/lib/logger";
 
 /** Escape a CSV cell value — wrap in quotes and escape internal quotes */
 function csvCell(value: string | number | null | undefined): string {
   const str = value == null ? "" : String(value);
-  // Escape double-quotes by doubling them, then wrap in quotes
   return `"${str.replace(/"/g, '""')}"`;
+}
+
+/** Format integer cents as a plain decimal string for CSV (e.g. 1128183 → "11281.83") */
+function centsToDecimal(cents: number, currency: string): string {
+  return fromCents(cents, currency).toFixed(currency === "TZS" ? 0 : 2);
 }
 
 /**
@@ -70,7 +76,7 @@ export async function GET(
         : (expense.paidBy?.name || "Unknown");
 
       const splitBreakdown = expense.splits
-        .map((s: any) => `${s.user?.name || "Unknown"}: ${Number(s.amount).toFixed(2)}`)
+        .map((s: any) => `${s.user?.name || "Unknown"}: ${centsToDecimal(s.amount, currency)}`)
         .join(" | ");
 
       return [
@@ -78,7 +84,7 @@ export async function GET(
         expense.description,
         expense.category || "other",
         payer,
-        Number(expense.amount).toFixed(2),
+        centsToDecimal(expense.amount, currency),
         currency,
         expense.splitType || "equal",
         splitBreakdown,
@@ -100,7 +106,7 @@ export async function GET(
       },
     });
   } catch (err) {
-    console.error("CSV export error:", err);
+    logError('[export-csv GET]', err);
     return errorResponse("Failed to export CSV", 500);
   }
 }

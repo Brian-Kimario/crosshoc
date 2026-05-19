@@ -1,5 +1,7 @@
 import { NextRequest } from "next/server";
 import { verifyAuth, errorResponse, successResponse, unauthorizedResponse } from "@/lib/auth";
+import { checkRateLimit, rateLimitExceededResponse } from "@/lib/rate-limit";
+import { logError } from "@/lib/logger";
 import dbConnect from "@/lib/db";
 import Group from "@/lib/models/Group";
 import { createInviteToken, buildInviteUrl } from "@/lib/invites";
@@ -13,6 +15,9 @@ export async function POST(
     await dbConnect();
     const userId = await verifyAuth(req);
     if (!userId) return unauthorizedResponse();
+
+    const rateLimitResult = await checkRateLimit(req, 'invite');
+    if (!rateLimitResult.success) return rateLimitExceededResponse(rateLimitResult);
 
     const { id } = await params;
     if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -38,7 +43,8 @@ export async function POST(
       token,
       expiresAt: new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString(),
     });
-  } catch {
+  } catch (error: unknown) {
+    logError('[invite POST]', error);
     return errorResponse("Failed to generate invite link", 500);
   }
 }

@@ -4,7 +4,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 export function ExpenseFeedSkeleton() {
   return (
     <div className="space-y-3">
-      {Array.from({ length: 4 }).map((_, i) => (
+      {/* Show fewer skeleton items on mobile for performance */}
+      {Array.from({ length: 3 }).map((_, i) => (
         <div
           key={i}
           className="rounded-3xl border border-slate-700 bg-slate-800/80 p-5 space-y-3"
@@ -14,11 +15,11 @@ export function ExpenseFeedSkeleton() {
               <Skeleton className="h-4 w-2/3 bg-slate-700" />
               <Skeleton className="h-3 w-1/3 bg-slate-700/60" />
             </div>
-            <Skeleton className="h-7 w-20 bg-slate-700" />
+            <Skeleton className="h-7 w-16 sm:w-20 bg-slate-700" />
           </div>
           <div className="flex items-center justify-between">
-            <Skeleton className="h-3 w-28 bg-slate-700/60" />
-            <Skeleton className="h-8 w-32 bg-slate-700/60 rounded-2xl" />
+            <Skeleton className="h-3 w-24 sm:w-28 bg-slate-700/60" />
+            <Skeleton className="h-8 w-28 sm:w-32 bg-slate-700/60 rounded-2xl" />
           </div>
         </div>
       ))}

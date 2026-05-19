@@ -2,6 +2,8 @@ import jwt from 'jsonwebtoken';
 import bcryptjs from 'bcryptjs';
 import { cookies } from 'next/headers';
 import { NextRequest, NextResponse } from 'next/server';
+import dbConnect from '@/lib/db';
+import User from '@/lib/models/User';
 
 // 30-day rolling session - user stays logged in for 30 days of inactivity
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '30d';
@@ -35,11 +37,26 @@ export async function comparePasswords(
 }
 
 /**
- * Sign a JWT token
+ * Sign a JWT token — embeds userId and tokenVersion in the payload
  */
-export function signToken(userId: string): string {
+export function signToken(userId: string, tokenVersion: number): string {
   const secret = getJwtSecret();
-  return jwt.sign({ userId }, secret, {
+  return jwt.sign({ userId, tokenVersion }, secret, {
+    expiresIn: JWT_EXPIRES_IN,
+  } as any);
+}
+
+/**
+ * Sign a JWT token with a sessionId — embeds userId, tokenVersion, and sessionId in the payload.
+ * Use this for new logins so the session can be tracked and revoked individually.
+ */
+export function signTokenWithSession(
+  userId: string,
+  tokenVersion: number,
+  sessionId: string
+): string {
+  const secret = getJwtSecret();
+  return jwt.sign({ userId, tokenVersion, sessionId }, secret, {
     expiresIn: JWT_EXPIRES_IN,
   } as any);
 }
@@ -47,10 +64,18 @@ export function signToken(userId: string): string {
 /**
  * Verify a JWT token
  */
-export function verifyToken(token: string): { userId: string } | null {
+export function verifyToken(token: string): {
+  userId: string;
+  tokenVersion: number;
+  sessionId?: string;
+} | null {
   try {
     const secret = getJwtSecret();
-    const decoded = jwt.verify(token, secret) as { userId: string };
+    const decoded = jwt.verify(token, secret) as {
+      userId: string;
+      tokenVersion: number;
+      sessionId?: string;
+    };
     return decoded;
   } catch (error) {
     return null;
@@ -103,12 +128,12 @@ export function shouldRefreshToken(token: string): boolean {
 }
 
 /**
- * Refresh token with new 30-day expiration
+ * Refresh token with new 30-day expiration, preserving tokenVersion
  */
 export function refreshToken(token: string): string | null {
   const decoded = verifyToken(token);
   if (!decoded) return null;
-  return signToken(decoded.userId);
+  return signToken(decoded.userId, decoded.tokenVersion);
 }
 
 /**
@@ -137,7 +162,9 @@ export async function clearTokenCookie() {
 
 /**
  * Middleware to verify authentication
- * Returns userId if authenticated, null otherwise
+ * Returns userId if authenticated, null otherwise.
+ * Performs a DB lookup to validate tokenVersion and isDisabled status.
+ * If the JWT contains a sessionId, also verifies the session exists in the user's sessions array.
  */
 export async function verifyAuth(request?: NextRequest): Promise<string | null> {
   let token: string | null = null;
@@ -153,7 +180,36 @@ export async function verifyAuth(request?: NextRequest): Promise<string | null> 
   if (!token) return null;
 
   const decoded = verifyToken(token);
-  return decoded?.userId || null;
+  if (!decoded?.userId) return null;
+
+  // DB lookup to validate tokenVersion and account status
+  await dbConnect();
+
+  // If JWT contains a sessionId, fetch sessions too so we can validate in one query
+  const selectFields = decoded.sessionId
+    ? 'tokenVersion isDisabled sessions'
+    : 'tokenVersion isDisabled';
+
+  const user = await User.findById(decoded.userId).select(selectFields);
+  if (!user) return null;
+  if (user.isDisabled) return null;
+  if (decoded.tokenVersion !== user.tokenVersion) return null;
+
+  // If JWT contains a sessionId, verify it exists in the sessions array
+  if (decoded.sessionId) {
+    const sessionExists = user.sessions?.some(
+      (s: any) => s.sessionId === decoded.sessionId
+    );
+    if (!sessionExists) return null; // session was revoked
+
+    // Fire-and-forget lastSeenAt refresh — do not await to keep request fast
+    User.findOneAndUpdate(
+      { _id: decoded.userId, 'sessions.sessionId': decoded.sessionId },
+      { $set: { 'sessions.$.lastSeenAt': new Date() } }
+    ).catch(() => {});
+  }
+
+  return decoded.userId;
 }
 
 /**

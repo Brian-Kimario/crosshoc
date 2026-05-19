@@ -3,7 +3,10 @@ import { NextRequest } from "next/server";
 
 import { errorResponse, successResponse, unauthorizedResponse, verifyAuth } from "@/lib/auth";
 import dbConnect from "@/lib/db";
+import { logError } from "@/lib/logger";
 import Group from "@/lib/models/Group";
+import { checkRateLimit, rateLimitExceededResponse } from "@/lib/rate-limit";
+import { CreateGroupSchema, parseBody } from "@/lib/validations";
 
 function createInviteToken() {
   return crypto.randomBytes(24).toString("hex");
@@ -18,19 +21,25 @@ export async function POST(request: NextRequest) {
       return unauthorizedResponse();
     }
 
-    const body = await request.json();
-    const name = typeof body?.name === "string" ? body.name.trim() : "";
-    const currency = ["USD", "INR", "TZS"].includes(body?.currency) ? body.currency : "USD";
-
-    if (!name) {
-      return errorResponse("Group name is required", 400);
+    const rateLimitResult = await checkRateLimit(request, "mutation");
+    if (!rateLimitResult.success) {
+      return rateLimitExceededResponse(rateLimitResult);
     }
+
+    const body = await request.json();
+    const parsed = parseBody(CreateGroupSchema, body);
+    if (!parsed.success) {
+      return parsed.response;
+    }
+
+    const { name, currency = "USD" } = parsed.data;
 
     const group = await Group.create({
       name,
       currency,
       creator: userId,
-      members: [{ user: userId, shareRatio: 100 }],
+      createdBy: userId,
+      members: [{ user: userId, role: "owner", joinedAt: new Date() }],
       inviteToken: createInviteToken(),
       inviteExpiresAt: new Date(Date.now() + 72 * 60 * 60 * 1000), // 72 hours
     });
@@ -59,6 +68,7 @@ export async function POST(request: NextRequest) {
       return errorResponse("Could not generate unique invite token. Please retry.", 409);
     }
 
+    logError("[groups POST]", error);
     return errorResponse("Failed to create group", 500);
   }
 }
@@ -72,9 +82,17 @@ export async function GET(request: NextRequest) {
       return unauthorizedResponse();
     }
 
-    const groups = await Group.find({ "members.user": userId })
-      .populate("creator", "name email avatar")
-      .populate("members.user", "name email avatar")
+    const { searchParams } = new URL(request.url);
+    const includeArchived = searchParams.get("archived") === "true";
+
+    const query: Record<string, unknown> = { "members.user": userId };
+    if (!includeArchived) {
+      query.status = { $ne: "archived" };
+    }
+
+    const groups = await Group.find(query)
+      .populate("creator", "name email avatar avatarUrl")
+      .populate("members.user", "name email avatar avatarUrl")
       .sort({ createdAt: -1 });
 
     return successResponse({
@@ -87,11 +105,12 @@ export async function GET(request: NextRequest) {
         inviteToken: group.inviteToken,
         inviteExpiresAt: group.inviteExpiresAt,
         createdAt: group.createdAt,
+        status: group.status,
+        archivedAt: group.archivedAt,
       })),
     });
   } catch (error: unknown) {
-    console.error("GET /api/groups error:", error);
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return errorResponse(`Failed to fetch groups: ${message}`, 500);
+    logError('[groups GET]', error);
+    return errorResponse('Failed to fetch groups', 500);
   }
 }

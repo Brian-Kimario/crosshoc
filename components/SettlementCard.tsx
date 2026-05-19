@@ -3,6 +3,7 @@
 import { CheckCircle, ArrowRight } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatCurrency, type SupportedCurrency } from "@/lib/format-utils";
+import { UserAvatar } from "@/components/ui/UserAvatar";
 
 interface SettlementCardProps {
   settlement: {
@@ -11,8 +12,8 @@ interface SettlementCardProps {
     method: string;
     note?: string;
     settledAt: string;
-    fromUser: { name: string; avatar?: string };
-    toUser: { name: string; avatar?: string };
+    fromUser: { name: string; avatar?: string; avatarUrl?: string };
+    toUser: { name: string; avatar?: string; avatarUrl?: string };
   };
   currency?: SupportedCurrency | string;
 }
@@ -45,8 +46,10 @@ export function SettlementCard({ settlement, currency = "USD" }: SettlementCardP
         </div>
 
         <div className="mt-4 flex items-center gap-2 text-sm">
+          <UserAvatar name={settlement.fromUser.name} avatarUrl={settlement.fromUser.avatarUrl ?? settlement.fromUser.avatar} size={24} />
           <span className="text-slate-300">{settlement.fromUser.name}</span>
           <ArrowRight className="size-4 text-emerald-400" />
+          <UserAvatar name={settlement.toUser.name} avatarUrl={settlement.toUser.avatarUrl ?? settlement.toUser.avatar} size={24} />
           <span className="text-emerald-300">{settlement.toUser.name}</span>
           <span className="text-xs text-slate-500 ml-2 capitalize">({settlement.method})</span>
         </div>

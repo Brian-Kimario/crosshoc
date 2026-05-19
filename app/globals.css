@@ -238,6 +238,20 @@
   }
 }
 
+/* Marquee animation for social proof banner */
+@keyframes marquee {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+.animate-marquee {
+  animation: marquee 30s linear infinite;
+}
+
 /* Reduce motion for accessibility */
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -248,4 +262,69 @@
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+
+  .animate-marquee {
+    animation: none;
+  }
+}
+
+/* ── Responsive typography ────────────────────────────────── */
+/* Prevent large headings from overflowing on 390px screens */
+h1 {
+  font-size: clamp(1.25rem, 5vw, 1.75rem);
+}
+h2 {
+  font-size: clamp(1.1rem, 4vw, 1.5rem);
+}
+
+/* Financial amounts — scale down on very small screens */
+.amount-large {
+  font-size: clamp(1.5rem, 7vw, 2.5rem);
+  line-height: 1.1;
+}
+
+/* ── iOS scroll lock when modals open ────────────────────── */
+body.overflow-locked {
+  overflow: hidden;
+  position: fixed;
+  width: 100%;
+  top: var(--scroll-y, 0);
+}
+
+/* ── Smooth native scrolling on iOS ──────────────────────── */
+.expense-feed,
+.settlements-list,
+.groups-list,
+.notification-panel {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+}
+
+/* ── Hide scrollbars on horizontal scroll ───────────────── */
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+/* ── Mobile tap feedback ────────────────────────────────── */
+@media (hover: none) {
+  .tap-feedback:active {
+    opacity: 0.7;
+    transform: scale(0.98);
+    transition:
+      opacity 0.1s,
+      transform 0.1s;
+  }
+}
+
+/* ── Prevent text selection on interactive elements ──────── */
+button,
+[role="button"],
+.tap-feedback {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
